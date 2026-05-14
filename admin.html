@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>故事坊 - 管理后台</title>
+    <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+    <!-- 登录区 -->
+    <div id="loginSection" class="login-section">
+        <div class="login-card">
+            <h1 class="login-title">故事坊管理后台</h1>
+            <form id="loginForm" class="login-form">
+                <input type="tel" id="adminPhone" class="login-input" placeholder="管理员手机号" maxlength="11">
+                <input type="password" id="adminPassword" class="login-input" placeholder="密码">
+                <button type="submit" class="login-btn">登录</button>
+                <p id="loginError" class="login-error"></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- 管理后台主体 -->
+    <div id="adminSection" class="admin-section hidden">
+        <!-- 顶部栏 -->
+        <header class="admin-header">
+            <h1 class="admin-header__title">故事坊管理后台</h1>
+            <button id="logoutBtn" class="admin-header__logout">退出</button>
+        </header>
+
+        <!-- 统计卡片 -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-card__value" id="statUsers">-</div>
+                <div class="stat-card__label">注册用户</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__value" id="statSessions">-</div>
+                <div class="stat-card__label">总会话数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__value" id="statConversations">-</div>
+                <div class="stat-card__label">对话轮数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__value" id="statSummaries">-</div>
+                <div class="stat-card__label">叙事摘要</div>
+            </div>
+        </div>
+
+        <!-- 用户列表 -->
+        <div class="users-panel">
+            <div class="users-panel__header">
+                <h2 class="users-panel__title">用户列表</h2>
+                <button id="refreshBtn" class="refresh-btn">刷新</button>
+            </div>
+            <div class="table-wrapper">
+                <table class="users-table">
+                    <thead>
+                        <tr>
+                            <th>姓名</th>
+                            <th>手机号</th>
+                            <th>年龄</th>
+                            <th>会话数</th>
+                            <th>对话数</th>
+                            <th>摘要数</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 用户详情弹窗 -->
+    <div id="userModal" class="modal hidden">
+        <div class="modal__overlay"></div>
+        <div class="modal__content">
+            <div class="modal__header">
+                <h2 id="modalUserName" class="modal__title">用户详情</h2>
+                <button id="modalClose" class="modal__close">&times;</button>
+            </div>
+            <div class="modal__tabs">
+                <button class="modal__tab modal__tab--active" data-tab="conversations">对话记录</button>
+                <button class="modal__tab" data-tab="summaries">叙事摘要</button>
+                <button class="modal__tab" data-tab="memory">记忆档案</button>
+                <button class="modal__tab" data-tab="biographies">成品自传</button>
+            </div>
+            <div class="modal__body">
+                <div id="tabConversations" class="tab-content"></div>
+                <div id="tabSummaries" class="tab-content hidden"></div>
+                <div id="tabMemory" class="tab-content hidden"></div>
+                <div id="tabBiographies" class="tab-content hidden"></div>
+            </div>
+            <div class="modal__footer">
+                <button id="deleteUserBtn" class="delete-btn">删除此用户及所有数据</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="admin.js"></script>
+</body>
+</html>

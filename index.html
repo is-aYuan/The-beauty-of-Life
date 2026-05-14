@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1A1A2E">
+    <title>故事坊 - AI家庭记忆传承</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!--
+        故事坊 MVP - 全语音交互前端
+        设计原则：Zero-UI / Voice-First / 适老化
+        适老化标准：大字号、大触控区域、高对比度、清晰反馈
+    -->
+
+    <!-- ① 登录/注册页面 -->
+    <div id="authPage" class="page auth-page">
+        <div class="auth-card">
+            <h1 class="auth-title">故事坊</h1>
+            <p class="auth-subtitle">AI家庭记忆传承</p>
+
+            <!-- 登录表单 -->
+            <div id="loginForm" class="auth-form">
+                <input
+                    type="tel"
+                    id="loginPhone"
+                    class="auth-input"
+                    placeholder="请输入手机号"
+                    maxlength="11"
+                    inputmode="numeric"
+                    pattern="[0-9]*"
+                    autocomplete="tel"
+                >
+                <button id="loginBtn" class="auth-btn">
+                    <span class="btn-text">登录</span>
+                </button>
+                <div class="auth-switch">
+                    <span class="auth-switch-text">还没有账号？</span>
+                    <button id="showRegister" class="auth-switch-btn">点击注册</button>
+                </div>
+            </div>
+
+            <!-- 注册表单 -->
+            <div id="registerForm" class="auth-form hidden">
+                <input
+                    type="tel"
+                    id="regPhone"
+                    class="auth-input"
+                    placeholder="手机号"
+                    maxlength="11"
+                    inputmode="numeric"
+                    pattern="[0-9]*"
+                    autocomplete="tel"
+                >
+                <input
+                    type="text"
+                    id="regName"
+                    class="auth-input"
+                    placeholder="您的姓名"
+                    autocomplete="name"
+                >
+                <input
+                    type="number"
+                    id="regAge"
+                    class="auth-input"
+                    placeholder="年龄（选填）"
+                    min="1"
+                    max="120"
+                    inputmode="numeric"
+                >
+                <button id="registerBtn" class="auth-btn">
+                    <span class="btn-text">注册</span>
+                </button>
+                <div class="auth-switch">
+                    <span class="auth-switch-text">已有账号？</span>
+                    <button id="showLogin" class="auth-switch-btn">返回登录</button>
+                </div>
+            </div>
+
+            <p id="authError" class="auth-error"></p>
+        </div>
+    </div>
+
+    <!-- ② 主聊天页面 -->
+    <div id="chatPage" class="page chat-page hidden">
+        <!-- 顶部状态栏 -->
+        <div class="top-bar">
+            <div class="user-info">
+                <span id="userName" class="user-name"></span>
+                <span id="userStats" class="user-stats"></span>
+            </div>
+            <button id="logoutBtn" class="logout-btn">退出</button>
+        </div>
+
+        <!-- 状态提示区 -->
+        <div id="statusArea" class="status-area">
+            <div id="statusText" class="status-text">请点击开始</div>
+        </div>
+
+        <!-- 音波可视化区 -->
+        <div id="visualizerContainer" class="visualizer-container">
+            <canvas id="visualizer" class="visualizer-canvas"></canvas>
+        </div>
+
+        <!-- 核心交互区 -->
+        <div id="interactionArea" class="interaction-area">
+            <button id="micBtn" class="mic-btn" aria-label="按住说话">
+                <svg class="mic-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                </svg>
+            </button>
+            <button id="stopBtn" class="stop-btn hidden" aria-label="结束本次访谈">
+                结束访谈
+            </button>
+        </div>
+
+        <!-- 模式切换 -->
+        <div id="modeToggle" class="mode-toggle">
+            <button id="modeManual" class="mode-btn mode-btn--active">按住说话</button>
+            <button id="modeAuto" class="mode-btn">放桌上畅聊</button>
+        </div>
+
+        <!-- 生成自传按钮 -->
+        <div id="biographyArea" class="biography-area">
+            <button id="generateBtn" class="generate-btn" aria-label="生成我的故事书">
+                <svg class="generate-btn__icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/>
+                </svg>
+                <span class="generate-btn__text">生成我的故事书</span>
+            </button>
+            <div id="biographyStatus" class="biography-status hidden"></div>
+        </div>
+
+        <!-- 字幕提示区 -->
+        <div id="subtitleArea" class="subtitle-area">
+            <div id="subtitleText" class="subtitle-text"></div>
+        </div>
+    </div>
+
+    <!-- ③ 网络断开遮罩层 -->
+    <div id="networkOverlay" class="network-overlay hidden">
+        <div class="network-overlay__content">
+            <div class="network-overlay__spinner"></div>
+            <div class="network-overlay__text">网络连接断开，正在重连...</div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
