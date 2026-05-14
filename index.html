@@ -86,59 +86,71 @@
 
     <!-- ② 主聊天页面 -->
     <div id="chatPage" class="page chat-page hidden">
-        <!-- 顶部状态栏 -->
-        <div class="top-bar">
-            <div class="user-info">
-                <span id="userName" class="user-name"></span>
-                <span id="userStats" class="user-stats"></span>
+        <!-- 固定头部区域 -->
+        <header class="chat-header">
+            <!-- 顶部状态栏 -->
+            <div class="top-bar">
+                <div class="user-info">
+                    <span id="userName" class="user-name"></span>
+                    <span id="userStats" class="user-stats"></span>
+                </div>
+                <button id="logoutBtn" class="logout-btn">退出</button>
             </div>
-            <button id="logoutBtn" class="logout-btn">退出</button>
-        </div>
 
-        <!-- 状态提示区 -->
-        <div id="statusArea" class="status-area">
-            <div id="statusText" class="status-text">请点击开始</div>
-        </div>
+            <!-- 状态提示区 -->
+            <div id="statusArea" class="status-area">
+                <div id="statusText" class="status-text">请点击开始</div>
+            </div>
+        </header>
 
-        <!-- 音波可视化区 -->
-        <div id="visualizerContainer" class="visualizer-container">
-            <canvas id="visualizer" class="visualizer-canvas"></canvas>
-        </div>
+        <!-- 弹性内容区 -->
+        <main class="chat-body">
+            <!-- 音波可视化区 -->
+            <div id="visualizerContainer" class="visualizer-container">
+                <canvas id="visualizer" class="visualizer-canvas"></canvas>
+            </div>
 
-        <!-- 核心交互区 -->
-        <div id="interactionArea" class="interaction-area">
-            <button id="micBtn" class="mic-btn" aria-label="按住说话">
-                <svg class="mic-icon" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-                </svg>
-            </button>
-            <button id="stopBtn" class="stop-btn hidden" aria-label="结束本次访谈">
-                结束访谈
-            </button>
-        </div>
+            <!-- 核心交互区 -->
+            <div id="interactionArea" class="interaction-area">
+                <div class="mic-btn-wrapper">
+                    <button id="micBtn" class="mic-btn" aria-label="按住说话" aria-describedby="mic-hint">
+                        <svg class="mic-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                        </svg>
+                    </button>
+                    <span id="mic-hint" class="mic-btn-hint">点我开始讲故事</span>
+                </div>
+                <button id="stopBtn" class="stop-btn hidden" aria-label="结束本次访谈">
+                    结束访谈
+                </button>
+            </div>
+        </main>
 
-        <!-- 模式切换 -->
-        <div id="modeToggle" class="mode-toggle">
-            <button id="modeManual" class="mode-btn mode-btn--active">按住说话</button>
-            <button id="modeAuto" class="mode-btn">放桌上畅聊</button>
-        </div>
+        <!-- 固定底部区域 -->
+        <footer class="chat-footer">
+            <!-- 模式切换 -->
+            <div id="modeToggle" class="mode-toggle">
+                <button id="modeManual" class="mode-btn mode-btn--active">按住说话</button>
+                <button id="modeAuto" class="mode-btn">放桌上畅聊</button>
+            </div>
 
-        <!-- 生成自传按钮 -->
-        <div id="biographyArea" class="biography-area">
-            <button id="generateBtn" class="generate-btn" aria-label="生成我的故事书">
-                <svg class="generate-btn__icon" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/>
-                </svg>
-                <span class="generate-btn__text">生成我的故事书</span>
-            </button>
-            <div id="biographyStatus" class="biography-status hidden"></div>
-        </div>
+            <!-- 生成自传按钮 -->
+            <div id="biographyArea" class="biography-area">
+                <button id="generateBtn" class="generate-btn" aria-label="生成我的故事书">
+                    <svg class="generate-btn__icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/>
+                    </svg>
+                    <span class="generate-btn__text">生成我的故事书</span>
+                </button>
+                <div id="biographyStatus" class="biography-status hidden"></div>
+            </div>
 
-        <!-- 字幕提示区 -->
-        <div id="subtitleArea" class="subtitle-area">
-            <div id="subtitleText" class="subtitle-text"></div>
-        </div>
+            <!-- 字幕提示区 - 固定高度 + 内部滚动 -->
+            <div id="subtitleArea" class="subtitle-container">
+                <div id="subtitleText" class="subtitle-text"></div>
+            </div>
+        </footer>
     </div>
 
     <!-- ③ 网络断开遮罩层 -->
