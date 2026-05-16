@@ -8,10 +8,7 @@ import {
   Pause,
   Square,
   Sparkles,
-  AlertTriangle,
-  Share2,
   User,
-  BookOpen,
 } from "lucide-react";
 import { useStoryEngine } from "../hooks/useStoryEngine";
 
@@ -35,13 +32,6 @@ const TAB_TITLES: Record<Tab, string> = {
   family: "亲情连接",
   settings: "设置",
 };
-
-const FAMILY = [
-  { name: "儿子 伟", role: "儿子" },
-  { name: "女儿 美", role: "女儿" },
-  { name: "孙子 博", role: "孙子" },
-  { name: "侄女 琳", role: "侄女" },
-];
 
 function MiniVisualizer({ freqData }: { freqData: Uint8Array | null }) {
   const bars = Array.from({ length: 48 }, (_, i) => {
@@ -76,7 +66,7 @@ function Index() {
     networkStatus,
     convoState,
     subtitle,
-    hasBiography,
+    topicProfile,
     userStats,
     chatHistory,
     frequencyData,
@@ -85,12 +75,12 @@ function Index() {
     stopManualRecord,
     startAutoRecord,
     stopAutoRecord,
-    stopAll
+    stopAll,
+    selectTopic
   } = useStoryEngine();
 
   const [activeTab, setActiveTab] = useState<Tab>("story");
   const [recordMode, setRecordMode] = useState<RecordMode>("hold");
-  const [isGeneratingBook, setIsGeneratingBook] = useState(false);
 
   const hasLocalUser = !!localStorage.getItem("story_user");
 
@@ -102,25 +92,12 @@ function Index() {
 
   if (!hasLocalUser || !user) return null;
 
-  const handleGenerateBiography = async () => {
-    setIsGeneratingBook(true);
-    try {
-      const res = await fetch(`http://localhost:8000/api/biographies/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.userId })
-      });
-      const data = await res.json();
-      if (!data.success) {
-        alert(data.error || "生成失败");
-      } else {
-        alert(`生成成功！《${data.title}》`);
-      }
-    } catch {
-      alert("网络错误，自传生成失败");
-    } finally {
-      setIsGeneratingBook(false);
-    }
+  const getTopicStatusLabel = (status: string, progress: number) => {
+    if (status === "rich" || progress >= 85) return "素材已丰富";
+    if (status === "needs_detail") return "继续补充";
+    if (status === "has_story") return "已有故事";
+    if (status === "started") return "刚刚开始";
+    return "还没开始";
   };
 
   return (
@@ -363,101 +340,60 @@ function Index() {
         )}
       </section>
 
-      {/* RIGHT FAMILY CARE */}
+      {/* RIGHT SIDEBAR */}
       <aside className="flex w-[25%] flex-col rounded-3xl bg-amber-100/70 p-5 shadow-md">
-        {/* Milestone Card */}
-        <div className="mb-6 rounded-2xl bg-white p-6 shadow-md">
-          <div className="mb-4 flex items-center gap-3">
-            <BookOpen className="h-7 w-7 text-amber-700" />
-            <h3 className="text-xl font-bold text-stone-800">传记准备进度</h3>
-          </div>
+        <div className="mb-4">
+          <p className="text-lg font-semibold text-stone-600">今天想聊哪个主题？</p>
+          <h2 className="mt-1 text-2xl font-bold text-stone-800">传记主题</h2>
+        </div>
 
-          {!hasBiography ? (
-            <div className="mb-5">
-              <p className="mt-3 text-lg font-semibold text-stone-800">
-                多和我聊聊您的故事
-              </p>
-              <p className="mt-1 text-base text-stone-600">
-                当您的生活细节积累足够，即可自动生成回忆录！
-              </p>
-            </div>
-          ) : (
-            <div className="mb-5">
-                <p className="mt-3 text-lg font-semibold text-emerald-600">
-                  可生成新版本传记！
-                </p>
-            </div>
-          )}
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+          {topicProfile?.topics.map((topic) => {
+            const active = topic.id === topicProfile.currentTopicId;
+            const progress = Math.max(0, Math.min(100, topic.progress || 0));
+            const statusLabel = getTopicStatusLabel(topic.status, progress);
 
-          {!hasBiography && (
+            return (
               <button
-                onClick={handleGenerateBiography}
-                className="flex w-full flex-col items-center gap-2 rounded-2xl bg-amber-600 px-4 py-6 text-white shadow-lg ring-4 ring-amber-300/40 transition-transform hover:scale-105 active:scale-95 animate-bounce cursor-pointer"
-                style={{ animationDuration: "2.5s" }}
+                key={topic.id}
+                onClick={() => selectTopic(topic.id)}
+                className={`w-full rounded-2xl px-4 py-3 text-left shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] ${
+                  active
+                    ? "bg-amber-300 text-stone-900 ring-2 ring-amber-700/35"
+                    : "bg-amber-50 text-stone-800 hover:bg-amber-100"
+                }`}
               >
-                <span className="text-2xl font-bold">📖 强行生成自传</span>
-                <span className="text-sm font-medium text-amber-50/90">
-                  (测试通道)
-                </span>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 text-lg font-bold leading-snug">
+                    {topic.title}
+                  </span>
+                  {active && (
+                    <span className="shrink-0 rounded-full bg-stone-800 px-2 py-1 text-xs font-semibold text-amber-50">
+                      正在聊
+                    </span>
+                  )}
+                </div>
+                <div className="mt-3 flex items-center gap-3">
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-stone-300/60">
+                    <div
+                      className={`h-full rounded-full ${
+                        progress >= 85 ? "bg-emerald-500" : "bg-amber-700"
+                      }`}
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <span className="w-10 text-right text-sm font-semibold text-stone-700">
+                    {progress}%
+                  </span>
+                </div>
+                <p className="mt-2 text-sm font-medium text-stone-600">
+                  {statusLabel}
+                </p>
               </button>
-          )}
-        </div>
-
-        <h2 className="px-1 pb-4 text-3xl font-bold text-stone-800">
-          亲情关怀
-        </h2>
-        <div className="grid grid-cols-2 gap-3">
-          {FAMILY.map((p) => (
-            <button
-              key={p.name}
-              className="flex flex-col items-center gap-2 rounded-2xl bg-amber-50 p-4 shadow-md transition-transform hover:scale-105 active:scale-95"
-            >
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-stone-700 text-amber-50">
-                <User className="h-8 w-8" />
-              </div>
-              <p className="text-lg font-semibold text-stone-800">{p.name}</p>
-              <p className="text-sm text-stone-500">{p.role}</p>
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-auto flex flex-col gap-3 pt-5">
-          <button className="flex items-center justify-center gap-3 rounded-2xl bg-red-600 px-4 py-6 text-2xl font-bold text-white shadow-md transition-transform hover:scale-105 active:scale-95">
-            <AlertTriangle className="h-8 w-8" />
-            紧急求助
-          </button>
-          <button className="flex items-center justify-center gap-3 rounded-2xl bg-stone-800 px-4 py-5 text-xl font-semibold text-amber-50 shadow-md transition-transform hover:scale-105 active:scale-95">
-            <Share2 className="h-6 w-6" />
-            分享给家人
-          </button>
+            );
+          })}
         </div>
       </aside>
-
-      {isGeneratingBook && (
-        <div className="fixed inset-0 z-50 flex h-full flex-col items-center justify-center bg-amber-50/95 backdrop-blur-sm">
-          <div
-            className="flex h-48 w-48 items-center justify-center rounded-2xl bg-stone-800 shadow-2xl ring-4 ring-amber-600/60 animate-bounce"
-            style={{ animationDuration: "2.4s" }}
-          >
-            <BookOpen className="h-32 w-32 animate-pulse text-amber-100" strokeWidth={1.6} />
-          </div>
-          <h2 className="mt-8 text-4xl font-bold text-stone-800">
-            正在为您撰写您的故事～
-          </h2>
-          <p className="mt-4 text-2xl text-stone-600">
-            AI 编辑正在为您精美排版，请稍作休息... (大概需要1-2分钟)
-          </p>
-          <div className="mt-8 h-6 w-1/2 overflow-hidden rounded-full bg-stone-200">
-            <div className="h-full w-[60%] animate-pulse rounded-full bg-amber-500" />
-          </div>
-          <button
-            onClick={() => setIsGeneratingBook(false)}
-            className="mt-12 rounded-full border-2 border-stone-300 px-8 py-3 text-xl text-stone-500 transition-transform hover:scale-105 active:scale-95"
-          >
-            隐藏弹窗 (后台生成中)
-          </button>
-        </div>
-      )}
     </main>
   );
 }

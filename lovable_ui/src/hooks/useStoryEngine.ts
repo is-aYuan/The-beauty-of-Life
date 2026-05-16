@@ -1,4 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  createFallbackTopicProfile,
+  type BiographyTopic,
+  type TopicProfile,
+  type TopicStatus,
+} from "../lib/biographyTopics";
 
 const CONFIG = {
   API_BASE: "http://localhost:8000",
@@ -16,6 +22,7 @@ let audioUnlocked = false;
 export type User = { userId: string; phone: string; name: string; age?: number };
 export type ConvoState = "idle" | "userRecording" | "aiThinking" | "aiTalking";
 export type ChatMessage = { id: number; role: "ai" | "user"; text: string };
+export type { BiographyTopic, TopicProfile, TopicStatus };
 
 export function useStoryEngine() {
   const [user, setUser] = useState<User | null>(null);
@@ -26,6 +33,7 @@ export function useStoryEngine() {
   const [userStats, setUserStats] = useState({ totalConversations: 0, estimatedDurationMin: 0 });
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [hasBiography, setHasBiography] = useState(false);
+  const [topicProfile, setTopicProfile] = useState<TopicProfile | null>(null);
 
   // References for mutable state that doesn't need to trigger renders
   const wsRef = useRef<WebSocket | null>(null);
@@ -117,8 +125,23 @@ export function useStoryEngine() {
     }
   };
 
+  const fetchTopicProfile = async () => {
+    if (!user) return;
+    try {
+      const res = await fetch(`${CONFIG.API_BASE}/api/topic-profile/${user.userId}`);
+      const profile = await res.json();
+      setTopicProfile(profile);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
-    if (user) fetchStats();
+    if (user) {
+      setTopicProfile((prev) => prev ?? createFallbackTopicProfile(user.userId));
+      fetchStats();
+      fetchTopicProfile();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -215,7 +238,15 @@ export function useStoryEngine() {
         setConvoState("idle");
         setSubtitle(msg.text || "");
         if (msg.hasBiography !== undefined) setHasBiography(msg.hasBiography);
+        if (msg.topicProfile) {
+          setTopicProfile(msg.topicProfile);
+        } else {
+          setTopicProfile(createFallbackTopicProfile(msg.user.userId));
+        }
         fetchStats();
+      }
+      if (msg.event === "topic_profile_updated" && msg.topicProfile) {
+        setTopicProfile(msg.topicProfile);
       }
       if (msg.status === "ai_thinking") setConvoState("aiThinking");
       if (msg.status === "ai_speaking") setConvoState("aiTalking");
@@ -468,6 +499,33 @@ export function useStoryEngine() {
     setConvoState("idle");
   };
 
+  const selectTopic = async (topicId: string) => {
+    if (!user) return;
+
+    setTopicProfile((prev) => {
+      const baseProfile = prev ?? createFallbackTopicProfile(user.userId);
+      return { ...baseProfile, currentTopicId: topicId };
+    });
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "select_topic", topicId }));
+      return;
+    }
+
+    try {
+      const res = await fetch(`${CONFIG.API_BASE}/api/topic-profile/${user.userId}/current-topic`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topicId }),
+      });
+      const data = await res.json();
+      if (data.profile) setTopicProfile(data.profile);
+    } catch (e) {
+      console.error(e);
+      fetchTopicProfile();
+    }
+  };
+
   return {
     user,
     wsConnected,
@@ -475,6 +533,7 @@ export function useStoryEngine() {
     convoState,
     subtitle,
     hasBiography,
+    topicProfile,
     userStats,
     chatHistory,
     frequencyData,
@@ -486,6 +545,7 @@ export function useStoryEngine() {
     startAutoRecord,
     stopAutoRecord,
     stopAll,
+    selectTopic,
     unlockAudioContext
   };
 }

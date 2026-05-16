@@ -16,6 +16,20 @@ const { WebSocketServer } = require('ws');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const {
+    BIOGRAPHY_TOPICS,
+    DEFAULT_TOPIC_ID,
+    createDefaultTopicProfile,
+    getTopicStatus,
+} = require('./lib/topicProfiles');
+const {
+    buildTopicInterviewPrompt,
+    buildTopicTurnAnalysisPrompt,
+    getSelectedTopic,
+} = require('./lib/topicPrompt');
+const {
+    applyTopicAnalysisToProfile,
+} = require('./lib/topicProgress');
 
 // ==================== CloudBase 初始化 ====================
 const cloudbase = require('@cloudbase/node-sdk');
@@ -139,6 +153,23 @@ const SUMMARY_SYSTEM_PROMPT = `你是一位专业的传记作者兼记忆分析�
     "depth": { "status": true或false, "reason": "判断依据" },
     "stories": { "status": true或false, "reason": "判断依据" },
     "emotions": { "status": true或false, "reason": "判断依据" }
+  },
+
+  "topicAnalysis": {
+    "topicId": "当前会话所属主题 ID，必须使用输入中提供的当前主题 ID",
+    "progress": 0到100的整数,
+    "summary": "该主题目前已获得的素材摘要，2-4句话，不要编造",
+    "knownFacts": ["该主题下已经明确的事实，如时间、地点、人物、身份关系"],
+    "concreteStories": ["该主题下已经出现的具体故事"],
+    "missingInfo": ["该主题接下来最值得补充的信息"],
+    "suggestedNextQuestion": "下次围绕这个主题最自然的一句追问",
+    "personProfileUpdates": {
+      "gender": "自然提到的性别，未提及则留空字符串",
+      "hometown": "自然提到的籍贯或老家，未提及则留空字符串",
+      "ethnicity": "自然提到的民族，未提及则留空字符串",
+      "age": "自然提到的年龄，未提及则留空字符串",
+      "birthYear": "自然提到的出生年份，未提及则留空字符串"
+    }
   }
 }
 
@@ -180,7 +211,17 @@ const SUMMARY_SYSTEM_PROMPT = `你是一位专业的传记作者兼记忆分析�
 
 14. **stories**：true=至少有一个包含时间、地点、人物、经过的完整故事，false=只有概括性描述。
 
-15. **emotions**：true=至少有一次表达过内心感受、反思、遗憾、珍惜等深层情感，false=只是客观叙述。`;
+15. **emotions**：true=至少有一次表达过内心感受、反思、遗憾、珍惜等深层情感，false=只是客观叙述。
+
+## 主题素材进度判断规则
+
+16. topicAnalysis 只评估输入中提供的“当前会话主要主题”。不要为其他主题打分。
+
+17. progress 按五个维度评分，每个维度最高 20 分：基础事实、具体事件、细节画面、情绪感受、人生影响。总分为 0-100 的整数。
+
+18. 如果用户没有讲到实质故事，progress 可以保持较低，不要为了显得完整而抬高分数。
+
+19. personProfileUpdates 只记录用户自然说出的基础档案。不要为了补齐字段而猜测。`;
 
 // ==================== 自传撰写 Prompt ====================
 
@@ -481,9 +522,14 @@ async function extractNarrativeSummary(sessionId, userId) {
         return;
     }
 
+    const latestTopicId = [...conversations].reverse().find(c => c.topicId)?.topicId || DEFAULT_TOPIC_ID;
+    const topicProfile = await getOrCreateTopicProfile(userId);
+    const selectedTopic = getSelectedTopic(topicProfile, latestTopicId);
+
     // 格式化对话为文本
     const dialogueText = conversations.map((c, i) => {
-        return `【第${i + 1}轮】\n用户：${c.userText}\nAI：${c.aiReply}`;
+        const topicLabel = c.topicTitle || selectedTopic?.title || '未标记主题';
+        return `【第${i + 1}轮｜主题：${topicLabel}】\n用户：${c.userText}\nAI：${c.aiReply}`;
     }).join('\n\n');
 
     // 计算本次会话素材字数
@@ -496,7 +542,13 @@ async function extractNarrativeSummary(sessionId, userId) {
             model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
             messages: [
                 { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
-                { role: 'user', content: `以下是老年人的对话记录，请提取叙事摘要和记忆档案：\n\n${dialogueText}` },
+                {
+                    role: 'user',
+                    content: `当前会话主要主题 ID：${latestTopicId}
+当前会话主要主题名：${selectedTopic?.title || '未标记主题'}
+
+以下是老年人的对话记录，请提取叙事摘要、记忆档案，并输出当前主题的 topicAnalysis：\n\n${dialogueText}`,
+                },
             ],
             temperature: 0.3,
             response_format: { type: 'json_object' },
@@ -516,6 +568,15 @@ async function extractNarrativeSummary(sessionId, userId) {
             }
         }
 
+        const topicAnalysis = summaryData.topicAnalysis
+            ? {
+                ...summaryData.topicAnalysis,
+                topicId: BIOGRAPHY_TOPICS.some(topic => topic.id === summaryData.topicAnalysis.topicId)
+                    ? summaryData.topicAnalysis.topicId
+                    : latestTopicId,
+            }
+            : null;
+
         // 存入 CloudBase summaries 集合
         await db.collection('summaries').add({
             sessionId,
@@ -526,6 +587,7 @@ async function extractNarrativeSummary(sessionId, userId) {
             emotionalNote: summaryData.emotionalNote || '',
             memoryArchive: summaryData.memoryArchive || {},
             readiness: summaryData.readiness || {},
+            topicAnalysis,
             conversationCount: conversations.length,
             sessionWordCount,
             createdAt: db.serverDate(),
@@ -536,6 +598,9 @@ async function extractNarrativeSummary(sessionId, userId) {
         // 更新记忆档案（累积合并）
         if (summaryData.memoryArchive || summaryData.readiness) {
             await updateMemoryProfile(userId, summaryData.memoryArchive, summaryData.readiness, sessionWordCount);
+        }
+        if (topicAnalysis) {
+            await updateTopicProfileFromAnalysis(userId, topicAnalysis);
         }
     } catch (err) {
         console.error(`[摘要] DeepSeek 调用失败:`, err.message);
@@ -795,6 +860,125 @@ async function getMemoryProfile(userId) {
         .where({ userId })
         .get();
     return result.data.length > 0 ? result.data[0] : null;
+}
+
+// ==================== 传记主题采访模块 ====================
+
+/**
+ * 将数据库中的主题档案补齐为当前版本，避免改动旧字段结构。
+ */
+function normalizeTopicProfile(profile, userId) {
+    const defaults = createDefaultTopicProfile(userId);
+    const existingTopics = new Map((profile?.topics || []).map((topic) => [topic.id, topic]));
+    const topics = defaults.topics.map((defaultTopic) => {
+        const existing = existingTopics.get(defaultTopic.id);
+        if (!existing) return defaultTopic;
+
+        const progress = Math.min(100, Math.max(0, Math.round(Number(existing.progress) || 0)));
+        return {
+            ...defaultTopic,
+            ...existing,
+            title: defaultTopic.title,
+            progress,
+            status: getTopicStatus(progress),
+            knownFacts: Array.isArray(existing.knownFacts) ? existing.knownFacts : [],
+            concreteStories: Array.isArray(existing.concreteStories) ? existing.concreteStories : [],
+            missingInfo: Array.isArray(existing.missingInfo) ? existing.missingInfo : [],
+        };
+    });
+
+    const currentTopicExists = topics.some((topic) => topic.id === profile?.currentTopicId);
+
+    return {
+        ...defaults,
+        ...profile,
+        userId,
+        currentTopicId: currentTopicExists ? profile.currentTopicId : DEFAULT_TOPIC_ID,
+        personProfile: profile?.personProfile || {},
+        topics,
+        allRichPromptShown: Boolean(profile?.allRichPromptShown),
+    };
+}
+
+/**
+ * 获取或创建用户主题采访档案。
+ */
+async function getOrCreateTopicProfile(userId) {
+    const result = await db.collection('topic_profiles')
+        .where({ userId })
+        .limit(1)
+        .get();
+
+    if (result.data.length > 0) {
+        const profile = normalizeTopicProfile(result.data[0], userId);
+        const shouldPatchMissingFields =
+            !result.data[0].topics ||
+            result.data[0].topics.length !== BIOGRAPHY_TOPICS.length ||
+            !result.data[0].currentTopicId;
+
+        if (shouldPatchMissingFields) {
+            await db.collection('topic_profiles').doc(result.data[0]._id).update({
+                currentTopicId: profile.currentTopicId,
+                personProfile: profile.personProfile,
+                topics: profile.topics,
+                allRichPromptShown: profile.allRichPromptShown,
+                updatedAt: db.serverDate(),
+            });
+        }
+
+        return profile;
+    }
+
+    const profile = createDefaultTopicProfile(userId);
+    const addResult = await db.collection('topic_profiles').add({
+        ...profile,
+        createdAt: db.serverDate(),
+        updatedAt: db.serverDate(),
+    });
+
+    return {
+        ...profile,
+        _id: addResult.id || addResult._id,
+    };
+}
+
+/**
+ * 更新当前采访主题；不触碰旧 memory_profiles 数据结构。
+ */
+async function updateCurrentTopic(userId, topicId) {
+    if (!BIOGRAPHY_TOPICS.some((topic) => topic.id === topicId)) {
+        throw new Error('无效的主题');
+    }
+
+    const profile = await getOrCreateTopicProfile(userId);
+    await db.collection('topic_profiles').doc(profile._id).update({
+        currentTopicId: topicId,
+        updatedAt: db.serverDate(),
+    });
+
+    return {
+        ...profile,
+        currentTopicId: topicId,
+    };
+}
+
+/**
+ * 将 DeepSeek 的主题分析结果合并回 topic_profiles。
+ */
+async function updateTopicProfileFromAnalysis(userId, topicAnalysis) {
+    if (!topicAnalysis?.topicId) return null;
+
+    const profile = await getOrCreateTopicProfile(userId);
+    const updatedProfile = applyTopicAnalysisToProfile(profile, topicAnalysis);
+
+    await db.collection('topic_profiles').doc(profile._id).update({
+        personProfile: updatedProfile.personProfile,
+        topics: updatedProfile.topics,
+        updatedAt: db.serverDate(),
+    });
+
+    console.log(`[主题档案] 已更新用户 ${userId} 的主题 ${topicAnalysis.topicId}，进度 ${topicAnalysis.progress || 0}%`);
+    return updatedProfile;
 }
 
 /**
@@ -1180,6 +1364,36 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 获取或创建用户主题采访档案
+    if (url.pathname.startsWith('/api/topic-profile/') && req.method === 'GET') {
+        const userId = url.pathname.split('/').pop();
+        try {
+            const profile = await getOrCreateTopicProfile(userId);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(profile));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+        }
+        return;
+    }
+
+    // 更新当前采访主题
+    if (url.pathname.match(/^\/api\/topic-profile\/[^/]+\/current-topic$/) && req.method === 'POST') {
+        const userId = url.pathname.split('/')[3];
+        try {
+            const body = await getRequestBody(req);
+            const { topicId } = JSON.parse(body);
+            const profile = await updateCurrentTopic(userId, topicId);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, profile }));
+        } catch (err) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+        return;
+    }
+
     // 获取用户自传列表
     if (url.pathname.match(/^\/api\/biographies\/[^/]+$/) && req.method === 'GET') {
         const userId = url.pathname.split('/').pop();
@@ -1501,6 +1715,7 @@ wss.on('connection', async (ws) => {
     sessions.set(sessionId, {
         ws,
         userId: null,
+        currentTopicId: DEFAULT_TOPIC_ID,
         audioChunks: [],
         conversationHistory: [],
         isProcessing: false,
@@ -1553,6 +1768,8 @@ async function handleMessage(sessionId, session, msg) {
             session.userId = result.userId;
             await createSession(sessionId, result.userId);
 
+            const topicProfile = await getOrCreateTopicProfile(result.userId);
+            session.currentTopicId = topicProfile.currentTopicId;
             const welcomeText = await getWelcomeText(result.userId, result.name);
             const hasBiography = await checkHasBiography(result.userId);
 
@@ -1561,6 +1778,7 @@ async function handleMessage(sessionId, session, msg) {
                 text: welcomeText,
                 user: result,
                 hasBiography,
+                topicProfile,
             });
         } else {
             sendJson(session.ws, {
@@ -1580,16 +1798,44 @@ async function handleMessage(sessionId, session, msg) {
             session.userId = result.userId;
             await createSession(sessionId, result.userId);
 
+            const topicProfile = await getOrCreateTopicProfile(result.userId);
+            session.currentTopicId = topicProfile.currentTopicId;
             sendJson(session.ws, {
                 status: 'ready',
                 text: `注册成功！您好，${name}！我是故事坊的AI助手，我来帮您把人生故事记录下来。您随便聊，想到什么说什么，我会帮您整理成一本故事书。`,
                 user: result,
                 hasBiography: false,
+                topicProfile,
             });
         } else {
             sendJson(session.ws, {
                 status: 'register_failed',
                 text: result.message,
+            });
+        }
+        return;
+    }
+
+    // 处理主题切换
+    if (msg.type === 'select_topic') {
+        if (!session.userId) {
+            sendJson(session.ws, { status: 'need_login', text: '请先登录' });
+            return;
+        }
+
+        try {
+            const topicProfile = await updateCurrentTopic(session.userId, msg.topicId);
+            session.currentTopicId = topicProfile.currentTopicId;
+            sendJson(session.ws, {
+                event: 'topic_profile_updated',
+                status: 'ready',
+                topicProfile,
+            });
+        } catch (err) {
+            sendJson(session.ws, {
+                event: 'topic_profile_error',
+                status: 'ready',
+                text: err.message,
             });
         }
         return;
@@ -1654,11 +1900,21 @@ async function processVoiceInteraction(sessionId, session, audioBuffer) {
     const aiReply = await chatWithAI(sessionId, session, userText);
     console.log(`[${sessionId}] AI 回复: "${aiReply}"`);
 
+    const topicProfile = await getOrCreateTopicProfile(userId);
+    const selectedTopic = getSelectedTopic(topicProfile, session.currentTopicId);
+
     await saveConversation(sessionId, userId, {
         userText,
         aiReply,
         audioFile,
         audioSizeKB: Math.round(audioBuffer.length / 1024),
+        topicId: selectedTopic?.id || session.currentTopicId || DEFAULT_TOPIC_ID,
+        topicTitle: selectedTopic?.title || '',
+        topicProgress: selectedTopic?.progress || 0,
+    });
+
+    analyzeTopicProgressFromTurn(sessionId, session, userText, aiReply).catch(err => {
+        console.error(`[主题分析] 本轮分析失败:`, err.message);
     });
 
     // ── Step 3: 语音合成 (TTS) ──
@@ -1701,8 +1957,17 @@ async function chatWithAI(sessionId, session, userText) {
             session.conversationHistory = session.conversationHistory.slice(-40);
         }
 
+        const topicProfile = session.userId
+            ? await getOrCreateTopicProfile(session.userId)
+            : null;
+        const topicPrompt = buildTopicInterviewPrompt(
+            AI_SYSTEM_PROMPT,
+            topicProfile,
+            session.currentTopicId,
+        );
+
         const messages = [
-            { Role: 'system', Content: AI_SYSTEM_PROMPT },
+            { Role: 'system', Content: topicPrompt },
             ...session.conversationHistory,
         ];
 
@@ -1721,6 +1986,55 @@ async function chatWithAI(sessionId, session, userText) {
     } catch (err) {
         console.error('[混元] 对话失败:', err.message || err);
         return '抱歉，AI 暂时无法回复，请稍后再试。';
+    }
+}
+
+function parseJsonObjectFromAI(rawContent) {
+    try {
+        return JSON.parse(rawContent);
+    } catch (parseErr) {
+        const jsonMatch = rawContent.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (jsonMatch) {
+            return JSON.parse(jsonMatch[1].trim());
+        }
+        throw parseErr;
+    }
+}
+
+async function analyzeTopicProgressFromTurn(sessionId, session, userText, aiReply) {
+    const userId = session.userId;
+    if (!userId) return;
+
+    const profile = await getOrCreateTopicProfile(userId);
+    const prompt = buildTopicTurnAnalysisPrompt(profile, session.currentTopicId, userText, aiReply);
+    if (!prompt) return;
+
+    const response = await deepseekClient.chat.completions.create({
+        model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+        messages: [
+            { role: 'user', content: prompt },
+        ],
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+    });
+
+    const rawContent = response.choices[0].message.content;
+    const data = parseJsonObjectFromAI(rawContent);
+    const topicAnalysis = data.topicAnalysis;
+    if (!topicAnalysis) return;
+
+    topicAnalysis.topicId = BIOGRAPHY_TOPICS.some(topic => topic.id === topicAnalysis.topicId)
+        ? topicAnalysis.topicId
+        : session.currentTopicId || DEFAULT_TOPIC_ID;
+
+    const updatedProfile = await updateTopicProfileFromAnalysis(userId, topicAnalysis);
+    if (updatedProfile) {
+        sendJson(session.ws, {
+            event: 'topic_profile_updated',
+            status: 'ready',
+            topicProfile: updatedProfile,
+        });
+        console.log(`[${sessionId}] 主题进度已推送到前端`);
     }
 }
 
