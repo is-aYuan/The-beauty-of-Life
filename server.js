@@ -30,6 +30,10 @@ const {
 const {
     applyTopicAnalysisToProfile,
 } = require('./lib/topicProgress');
+const {
+    deleteCollectionDocsByUserId,
+    deleteUserAudioFiles,
+} = require('./lib/userDeletion');
 
 // ==================== CloudBase 初始化 ====================
 const cloudbase = require('@cloudbase/node-sdk');
@@ -373,54 +377,43 @@ async function updateUserProfile(userId, updates) {
 
 /**
  * 删除用户及其所有关联数据（级联删除）
- * 清理集合：users → sessions → conversations → summaries
+ * 清理集合：conversations → summaries → memory_profiles → topic_profiles → biographies → sessions → users
+ * 同时清理本地音频文件：data/records/{userId}
  */
 async function deleteUser(userId) {
-    // 1. 删除对话记录
-    const convResult = await db.collection('conversations').where({ userId }).get();
-    for (const doc of convResult.data) {
-        await db.collection('conversations').doc(doc._id).remove();
-    }
-    console.log(`[删除] 已清理 ${convResult.data.length} 条对话记录`);
+    const deletedConversations = await deleteCollectionDocsByUserId(db, 'conversations', userId);
+    console.log(`[删除] 已清理 ${deletedConversations} 条对话记录`);
 
-    // 2. 删除叙事摘要
-    const summResult = await db.collection('summaries').where({ userId }).get();
-    for (const doc of summResult.data) {
-        await db.collection('summaries').doc(doc._id).remove();
-    }
-    console.log(`[删除] 已清理 ${summResult.data.length} 条叙事摘要`);
+    const deletedSummaries = await deleteCollectionDocsByUserId(db, 'summaries', userId);
+    console.log(`[删除] 已清理 ${deletedSummaries} 条叙事摘要`);
 
-    // 3. 删除记忆档案
-    const memResult = await db.collection('memory_profiles').where({ userId }).get();
-    for (const doc of memResult.data) {
-        await db.collection('memory_profiles').doc(doc._id).remove();
-    }
-    console.log(`[删除] 已清理 ${memResult.data.length} 条记忆档案`);
+    const deletedMemoryProfiles = await deleteCollectionDocsByUserId(db, 'memory_profiles', userId);
+    console.log(`[删除] 已清理 ${deletedMemoryProfiles} 条记忆档案`);
 
-    // 4. 删除成品自传
-    const bioResult = await db.collection('biographies').where({ userId }).get();
-    for (const doc of bioResult.data) {
-        await db.collection('biographies').doc(doc._id).remove();
-    }
-    console.log(`[删除] 已清理 ${bioResult.data.length} 条成品自传`);
+    const deletedTopicProfiles = await deleteCollectionDocsByUserId(db, 'topic_profiles', userId);
+    console.log(`[删除] 已清理 ${deletedTopicProfiles} 条主题档案`);
 
-    // 5. 删除会话
-    const sessResult = await db.collection('sessions').where({ userId }).get();
-    for (const doc of sessResult.data) {
-        await db.collection('sessions').doc(doc._id).remove();
-    }
-    console.log(`[删除] 已清理 ${sessResult.data.length} 条会话记录`);
+    const deletedBiographies = await deleteCollectionDocsByUserId(db, 'biographies', userId);
+    console.log(`[删除] 已清理 ${deletedBiographies} 条成品自传`);
 
-    // 6. 删除用户
+    const deletedSessions = await deleteCollectionDocsByUserId(db, 'sessions', userId);
+    console.log(`[删除] 已清理 ${deletedSessions} 条会话记录`);
+
+    const audioResult = deleteUserAudioFiles(AUDIO_ROOT, userId);
+    console.log(`[删除] 本地音频目录${audioResult.deletedAudioDir ? '已清理' : '不存在'}: ${audioResult.audioDir}`);
+
     await db.collection('users').doc(userId).remove();
     console.log(`[删除] 用户 ${userId} 已删除`);
 
     return {
-        deletedConversations: convResult.data.length,
-        deletedSummaries: summResult.data.length,
-        deletedMemoryProfiles: memResult.data.length,
-        deletedBiographies: bioResult.data.length,
-        deletedSessions: sessResult.data.length,
+        deletedConversations,
+        deletedSummaries,
+        deletedMemoryProfiles,
+        deletedTopicProfiles,
+        deletedBiographies,
+        deletedSessions,
+        deletedAudioDir: audioResult.deletedAudioDir,
+        deletedUser: true,
     };
 }
 

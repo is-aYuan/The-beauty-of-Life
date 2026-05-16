@@ -345,7 +345,13 @@ function UserDetailModal({ user, onClose, authFetch }: { user: AdminUser, onClos
       const res = await authFetch(`${API_BASE}/api/admin/user/${user.id}`, { method: "DELETE" });
       const json = await res.json();
       if (json.success) {
-        alert("删除成功！");
+        alert(
+          `删除成功！\n` +
+          `对话 ${json.deletedConversations || 0} 条，摘要 ${json.deletedSummaries || 0} 条，` +
+          `记忆档案 ${json.deletedMemoryProfiles || 0} 条，主题档案 ${json.deletedTopicProfiles || 0} 条，` +
+          `自传 ${json.deletedBiographies || 0} 条，会话 ${json.deletedSessions || 0} 条。\n` +
+          `本地音频：${json.deletedAudioDir ? "已清理" : "无本地目录"}`
+        );
         onClose();
       } else alert("删除失败: " + json.error);
     } catch { alert("网络错误"); }
