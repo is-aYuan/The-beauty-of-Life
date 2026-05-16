@@ -9,14 +9,17 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
+  const [needsPasswordSetup, setNeedsPasswordSetup] = useState(false);
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [age, setAge] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   
-  const { login, register } = useStoryEngine();
+  const { login, register, setPassword: setUserPassword } = useStoryEngine();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,20 +31,35 @@ function LoginPage() {
       setErrorMsg("请输入您的姓名");
       return;
     }
+    if (!password || password.length < 6) {
+      setErrorMsg("密码至少需要 6 位");
+      return;
+    }
+    if ((!isLogin || needsPasswordSetup) && password !== confirmPassword) {
+      setErrorMsg("两次输入的密码不一致");
+      return;
+    }
     
     setIsLoading(true);
     setErrorMsg("");
     
     let result;
-    if (isLogin) {
-      result = await login(phone);
+    if (needsPasswordSetup) {
+      result = await setUserPassword(phone, password);
+    } else if (isLogin) {
+      result = await login(phone, password);
     } else {
-      result = await register(phone, name, age);
+      result = await register(phone, name, age, password);
     }
     
     setIsLoading(false);
     if (result.success) {
       navigate({ to: "/" });
+    } else if (result.needSetPassword) {
+      setNeedsPasswordSetup(true);
+      setPassword("");
+      setConfirmPassword("");
+      setErrorMsg(result.message || "请先设置登录密码");
     } else {
       setErrorMsg(result.message || "操作失败，请重试");
     }
@@ -49,6 +67,20 @@ function LoginPage() {
 
   const inputCls =
     "bg-stone-900/50 text-amber-100 text-xl w-full p-4 rounded-xl mb-4 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-amber-200/40 border border-stone-700";
+
+  const switchMode = () => {
+    setIsLogin(!isLogin);
+    setNeedsPasswordSetup(false);
+    setPassword("");
+    setConfirmPassword("");
+    setErrorMsg("");
+  };
+
+  const submitLabel = needsPasswordSetup
+    ? "设置密码并进入"
+    : isLogin
+      ? "翻开我的故事"
+      : "登记并开启我的故事";
 
   return (
     <main
@@ -72,7 +104,9 @@ function LoginPage() {
         >
           故事坊
         </h1>
-        <p className="text-xl text-amber-200/80 mb-8">AI 家庭记忆传承</p>
+        <p className="text-xl text-amber-200/80 mb-8">
+          {needsPasswordSetup ? "请先设置登录密码" : "AI 家庭记忆传承"}
+        </p>
 
         {errorMsg && (
           <p className="text-red-400 text-center mb-4 bg-red-900/20 p-2 rounded-lg animate-pulse">
@@ -94,7 +128,7 @@ function LoginPage() {
             disabled={isLoading}
           />
 
-          {!isLogin && (
+          {!isLogin && !needsPasswordSetup && (
             <>
               <input
                 type="text"
@@ -115,21 +149,45 @@ function LoginPage() {
             </>
           )}
 
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={needsPasswordSetup ? "请设置登录密码（至少6位）" : "请输入密码"}
+            className={inputCls}
+            disabled={isLoading}
+            autoComplete={isLogin && !needsPasswordSetup ? "current-password" : "new-password"}
+          />
+
+          {(!isLogin || needsPasswordSetup) && (
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="请再次输入密码"
+              className={inputCls}
+              disabled={isLoading}
+              autoComplete="new-password"
+            />
+          )}
+
           <button
             type="submit"
             disabled={isLoading}
             className="bg-amber-600 text-white text-2xl font-bold w-full py-4 rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all mt-2 disabled:opacity-50 disabled:hover:scale-100 cursor-pointer"
           >
-            {isLoading ? "处理中..." : (isLogin ? "翻开我的故事" : "登记并开启我的故事")}
+            {isLoading ? "处理中..." : submitLabel}
           </button>
         </form>
 
-        <p
-          onClick={() => setIsLogin(!isLogin)}
-          className="text-stone-400 text-center mt-6 cursor-pointer hover:text-amber-300 text-lg transition-colors"
-        >
-          {isLogin ? "第一次使用？点击这里登记" : "已有专属日记本？返回开锁"}
-        </p>
+        {!needsPasswordSetup && (
+          <p
+            onClick={switchMode}
+            className="text-stone-400 text-center mt-6 cursor-pointer hover:text-amber-300 text-lg transition-colors"
+          >
+            {isLogin ? "第一次使用？点击这里登记" : "已有专属日记本？返回开锁"}
+          </p>
+        )}
       </div>
     </main>
   );

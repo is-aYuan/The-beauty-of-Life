@@ -57,6 +57,42 @@ test('includes a gentle richness rule for topics at or above 85 percent', () => 
     assert.match(prompt, /允许老人继续讲/);
 });
 
+test('guides AI to ask only one missing elder profile field and avoid repeated questions', () => {
+    const profile = createDefaultTopicProfile('user_1');
+    profile.currentTopicId = 'childhood';
+    profile.personProfile = {
+        hometown: '河南',
+        age: 78,
+    };
+
+    const prompt = buildTopicInterviewPrompt('基础提示', profile, 'childhood');
+
+    assert.match(prompt, /基础档案补充/);
+    assert.match(prompt, /已知基础档案：籍贯\/老家：河南；年龄：78/);
+    assert.match(prompt, /仍缺：性别、民族/);
+    assert.match(prompt, /优先只自然询问「性别」/);
+    assert.match(prompt, /老人可以跳过/);
+    assert.match(prompt, /不要重复询问已知字段/);
+});
+
+test('does not ask elder profile questions when profile is complete', () => {
+    const profile = createDefaultTopicProfile('user_1');
+    profile.currentTopicId = 'childhood';
+    profile.personProfile = {
+        gender: '男',
+        hometown: '河南',
+        ethnicity: '汉族',
+        birthYear: '1948',
+    };
+
+    const prompt = buildTopicInterviewPrompt('基础提示', profile, 'childhood');
+
+    assert.match(prompt, /基础档案补充/);
+    assert.match(prompt, /基础档案已经足够/);
+    assert.match(prompt, /不要再主动追问性别、籍贯、民族、年龄/);
+    assert.doesNotMatch(prompt, /仍缺：/);
+});
+
 test('builds a per-turn topic analysis prompt with the current turn and topic profile', () => {
     const profile = createDefaultTopicProfile('user_1');
     profile.currentTopicId = 'work_livelihood';

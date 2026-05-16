@@ -34,6 +34,20 @@ const {
     deleteCollectionDocsByUserId,
     deleteUserAudioFiles,
 } = require('./lib/userDeletion');
+const {
+    createAuthToken,
+    hashPassword,
+    validatePassword,
+    verifyAuthToken,
+    verifyPassword,
+} = require('./lib/authPassword');
+const {
+    buildArchiveView,
+} = require('./lib/archiveView');
+const {
+    buildRecommendationConversationRecord,
+    normalizeRecommendationQuestion,
+} = require('./lib/recommendationQuestion');
 
 // ==================== CloudBase 初始化 ====================
 const cloudbase = require('@cloudbase/node-sdk');
@@ -60,6 +74,7 @@ const SECRET_KEY = process.env.TENCENT_SECRET_KEY;
 const REGION = process.env.TENCENT_REGION || 'ap-guangzhou';
 const HUNYUAN_MODEL = process.env.HUNYUAN_MODEL || 'hunyuan-turbos-latest';
 const AI_SYSTEM_PROMPT = process.env.AI_SYSTEM_PROMPT || '你是故事坊的AI助手，专门帮助老年人记录家庭故事和记忆。请用温暖、耐心、简洁的语气回复，每次回复不超过100字。鼓励老人继续讲述，适当提问引导。';
+const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || SECRET_KEY || 'story-workshop-dev-secret';
 
 const AUDIO_ROOT = path.join(__dirname, 'data', 'records');
 
@@ -314,38 +329,66 @@ const BIOGRAPHY_SYSTEM_PROMPT = `你是一位专业的传记作家。你的任�
  * 用户注册
  * 使用手机号作为唯一标识，同时创建用户资料
  */
-async function registerUser(phone, name, age) {
+async function registerUser(phone, name, age, password) {
     // 检查手机号是否已注册
     const existing = await db.collection('users').where({ phone }).get();
     if (existing.data.length > 0) {
         return { success: false, message: '该手机号已注册' };
     }
 
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+        return { success: false, message: passwordValidation.message };
+    }
+    const { passwordHash, passwordSalt } = hashPassword(password);
+
     // 创建用户
     const result = await db.collection('users').add({
         phone,
         name,
         age: age || null,
+        passwordHash,
+        passwordSalt,
         createdAt: db.serverDate(),
         updatedAt: db.serverDate(),
         status: 'active',
     });
 
     console.log(`[用户] 注册成功: ${name} (${phone})`);
-    return { success: true, userId: result.id, phone, name };
+    return {
+        success: true,
+        userId: result.id,
+        phone,
+        name,
+        authToken: createAuthToken({ userId: result.id, phone }, AUTH_TOKEN_SECRET),
+    };
 }
 
 /**
  * 用户登录
  * 使用手机号登录，返回用户信息
  */
-async function loginUser(phone) {
+async function loginUser(phone, password) {
     const result = await db.collection('users').where({ phone, status: 'active' }).get();
     if (result.data.length === 0) {
-        return { success: false, message: '用户不存在' };
+        return { success: false, message: '手机号或密码错误' };
     }
 
     const user = result.data[0];
+    if (!user.passwordHash || !user.passwordSalt) {
+        return {
+            success: false,
+            needSetPassword: true,
+            phone: user.phone,
+            name: user.name,
+            message: '为了保护您的回忆资料，请先设置登录密码',
+        };
+    }
+
+    if (!verifyPassword(password, user.passwordHash, user.passwordSalt)) {
+        return { success: false, message: '手机号或密码错误' };
+    }
+
     console.log(`[用户] 登录成功: ${user.name} (${phone})`);
     return {
         success: true,
@@ -353,6 +396,44 @@ async function loginUser(phone) {
         phone: user.phone,
         name: user.name,
         age: user.age,
+        authToken: createAuthToken({ userId: user._id, phone: user.phone }, AUTH_TOKEN_SECRET),
+    };
+}
+
+/**
+ * 老用户首次设置密码
+ */
+async function setUserPassword(phone, password) {
+    const result = await db.collection('users').where({ phone, status: 'active' }).get();
+    if (result.data.length === 0) {
+        return { success: false, message: '用户不存在' };
+    }
+
+    const validation = validatePassword(password);
+    if (!validation.valid) {
+        return { success: false, message: validation.message };
+    }
+
+    const user = result.data[0];
+    if (user.passwordHash && user.passwordSalt) {
+        return { success: false, message: '该账号已设置密码，请直接登录' };
+    }
+
+    const { passwordHash, passwordSalt } = hashPassword(password);
+    await db.collection('users').doc(user._id).update({
+        passwordHash,
+        passwordSalt,
+        updatedAt: db.serverDate(),
+    });
+
+    console.log(`[用户] 已设置登录密码: ${user.name} (${phone})`);
+    return {
+        success: true,
+        userId: user._id,
+        phone: user.phone,
+        name: user.name,
+        age: user.age,
+        authToken: createAuthToken({ userId: user._id, phone: user.phone }, AUTH_TOKEN_SECRET),
     };
 }
 
@@ -501,6 +582,30 @@ async function getSessionConversations(sessionId) {
         .orderBy('timestamp', 'asc')
         .get();
     return result.data;
+}
+
+async function getUserSummaries(userId) {
+    const result = await db.collection('summaries')
+        .where({ userId })
+        .orderBy('createdAt', 'desc')
+        .get();
+    return result.data;
+}
+
+async function getMyArchiveView(userId) {
+    const [conversations, summaries, memoryProfile, topicProfile] = await Promise.all([
+        getUserConversations(userId),
+        getUserSummaries(userId),
+        getMemoryProfile(userId),
+        getOrCreateTopicProfile(userId),
+    ]);
+
+    return buildArchiveView({
+        conversations,
+        summaries,
+        memoryProfile,
+        topicProfile,
+    });
 }
 
 /**
@@ -1182,8 +1287,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/register' && req.method === 'POST') {
         try {
             const body = await getRequestBody(req);
-            const { phone, name, age } = JSON.parse(body);
-            const result = await registerUser(phone, name, age);
+            const { phone, name, age, password } = JSON.parse(body);
+            const result = await registerUser(phone, name, age, password);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result));
         } catch (err) {
@@ -1197,8 +1302,23 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/login' && req.method === 'POST') {
         try {
             const body = await getRequestBody(req);
-            const { phone } = JSON.parse(body);
-            const result = await loginUser(phone);
+            const { phone, password } = JSON.parse(body);
+            const result = await loginUser(phone, password);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+        }
+        return;
+    }
+
+    // 老用户首次设置密码
+    if (url.pathname === '/api/users/set-password' && req.method === 'POST') {
+        try {
+            const body = await getRequestBody(req);
+            const { phone, password } = JSON.parse(body);
+            const result = await setUserPassword(phone, password);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result));
         } catch (err) {
@@ -1278,16 +1398,27 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // AI整理：用户端回忆资料小报
+    if (url.pathname.startsWith('/api/my-archive/') && req.method === 'GET') {
+        const userId = url.pathname.split('/').pop();
+        try {
+            const archive = await getMyArchiveView(userId);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(archive));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+        }
+        return;
+    }
+
     // 用户叙事摘要列表
     if (url.pathname.startsWith('/api/summaries/') && req.method === 'GET') {
         const userId = url.pathname.split('/').pop();
         try {
-            const result = await db.collection('summaries')
-                .where({ userId })
-                .orderBy('createdAt', 'desc')
-                .get();
+            const summaries = await getUserSummaries(userId);
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(result.data));
+            res.end(JSON.stringify(summaries));
         } catch (err) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: err.message }));
@@ -1711,6 +1842,7 @@ wss.on('connection', async (ws) => {
         currentTopicId: DEFAULT_TOPIC_ID,
         audioChunks: [],
         conversationHistory: [],
+        pendingRecommendationQuestion: null,
         isProcessing: false,
     });
 
@@ -1754,10 +1886,39 @@ async function handleMessage(sessionId, session, msg) {
 
     // 处理登录
     if (msg.type === 'login') {
-        const { phone } = msg;
-        const result = await loginUser(phone);
+        const { phone, password, authToken } = msg;
+        let result;
+
+        if (authToken) {
+            const tokenResult = verifyAuthToken(authToken, AUTH_TOKEN_SECRET);
+            if (!tokenResult.valid || tokenResult.payload.phone !== phone) {
+                sendJson(session.ws, {
+                    status: 'login_failed',
+                    text: '登录已过期，请重新登录',
+                });
+                return;
+            }
+            result = {
+                success: true,
+                userId: tokenResult.payload.userId,
+                phone: tokenResult.payload.phone,
+                name: '',
+            };
+        } else {
+            result = await loginUser(phone, password);
+        }
 
         if (result.success) {
+            const userProfile = await getUserProfile(result.userId);
+            if (!userProfile || userProfile.status !== 'active') {
+                sendJson(session.ws, {
+                    status: 'login_failed',
+                    text: '登录已过期，请重新登录',
+                });
+                return;
+            }
+            result.name = userProfile.name;
+            result.age = userProfile.age;
             session.userId = result.userId;
             await createSession(sessionId, result.userId);
 
@@ -1777,6 +1938,7 @@ async function handleMessage(sessionId, session, msg) {
             sendJson(session.ws, {
                 status: 'login_failed',
                 text: result.message,
+                needSetPassword: result.needSetPassword || false,
             });
         }
         return;
@@ -1784,8 +1946,8 @@ async function handleMessage(sessionId, session, msg) {
 
     // 处理注册
     if (msg.type === 'register') {
-        const { phone, name, age } = msg;
-        const result = await registerUser(phone, name, age);
+        const { phone, name, age, password } = msg;
+        const result = await registerUser(phone, name, age, password);
 
         if (result.success) {
             session.userId = result.userId;
@@ -1830,6 +1992,33 @@ async function handleMessage(sessionId, session, msg) {
                 status: 'ready',
                 text: err.message,
             });
+        }
+        return;
+    }
+
+    // AI整理推荐问题：作为正式 AI 提问记录保存，并朗读给老人听。
+    if (msg.type === 'start_recommendation_question') {
+        if (!session.userId) {
+            sendJson(session.ws, { status: 'need_login', text: '请先登录' });
+            return;
+        }
+
+        if (session.isProcessing) {
+            console.log(`[${sessionId}] 上一轮还在处理中，跳过推荐问题`);
+            return;
+        }
+
+        session.isProcessing = true;
+        try {
+            await startRecommendationQuestion(sessionId, session, msg);
+        } catch (err) {
+            console.error(`[${sessionId}] 推荐问题处理失败:`, err);
+            sendJson(session.ws, {
+                status: 'ready',
+                text: err.message || '推荐问题播放失败，请稍后再试。',
+            });
+        } finally {
+            session.isProcessing = false;
         }
         return;
     }
@@ -1924,6 +2113,55 @@ async function processVoiceInteraction(sessionId, session, audioBuffer) {
     console.log(`[${sessionId}] 交互完成`);
 }
 
+async function startRecommendationQuestion(sessionId, session, msg) {
+    const userId = session.userId;
+    const recommendation = normalizeRecommendationQuestion(msg);
+
+    const topicProfile = await updateCurrentTopic(userId, recommendation.topicId);
+    session.currentTopicId = topicProfile.currentTopicId;
+    const selectedTopic = getSelectedTopic(topicProfile, session.currentTopicId);
+
+    const record = buildRecommendationConversationRecord({
+        recommendation,
+        selectedTopic,
+    });
+
+    await saveConversation(sessionId, userId, record);
+
+    session.pendingRecommendationQuestion = {
+        topicId: record.topicId,
+        question: record.aiReply,
+        title: record.recommendation.title,
+        sourceType: record.recommendation.sourceType,
+        sourceId: record.recommendation.sourceId,
+    };
+    session.conversationHistory.push({ Role: 'assistant', Content: record.aiReply });
+    if (session.conversationHistory.length > 40) {
+        session.conversationHistory = session.conversationHistory.slice(-40);
+    }
+
+    sendJson(session.ws, {
+        event: 'topic_profile_updated',
+        status: 'ready',
+        topicProfile,
+    });
+
+    sendJson(session.ws, {
+        event: 'recommendation_question_started',
+        status: 'ai_speaking',
+        text: record.aiReply,
+        recommendation: session.pendingRecommendationQuestion,
+    });
+
+    const audioData = await synthesizeSpeech(record.aiReply);
+    if (audioData) {
+        session.ws.send(audioData);
+        console.log(`[${sessionId}] 推荐问题 TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
+    }
+
+    sendJson(session.ws, { event: 'ai_response_end', status: 'ready' });
+}
+
 async function recognizeSpeech(audioBuffer) {
     try {
         const audioBase64 = audioBuffer.toString('base64');
@@ -1958,9 +2196,12 @@ async function chatWithAI(sessionId, session, userText) {
             topicProfile,
             session.currentTopicId,
         );
+        const pendingQuestionPrompt = session.pendingRecommendationQuestion
+            ? `\n\n## 上一句 AI 推荐追问\n\n${session.pendingRecommendationQuestion.question}\n\n用户正在回答这个推荐问题，请自然承接，不要重复问同一句。`
+            : '';
 
         const messages = [
-            { Role: 'system', Content: topicPrompt },
+            { Role: 'system', Content: `${topicPrompt}${pendingQuestionPrompt}` },
             ...session.conversationHistory,
         ];
 
@@ -1975,9 +2216,15 @@ async function chatWithAI(sessionId, session, userText) {
         const aiReply = result.Choices?.[0]?.Message?.Content || '抱歉，我没有理解，请再说一次。';
 
         session.conversationHistory.push({ Role: 'assistant', Content: aiReply });
+        if (session.pendingRecommendationQuestion) {
+            session.pendingRecommendationQuestion = null;
+        }
         return aiReply;
     } catch (err) {
         console.error('[混元] 对话失败:', err.message || err);
+        if (session.pendingRecommendationQuestion) {
+            session.pendingRecommendationQuestion = null;
+        }
         return '抱歉，AI 暂时无法回复，请稍后再试。';
     }
 }

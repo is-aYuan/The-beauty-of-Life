@@ -5,6 +5,8 @@ import {
   type TopicProfile,
   type TopicStatus,
 } from "../lib/biographyTopics";
+import { isAudioPlaybackAllowed } from "../lib/audioSessionGuard";
+import type { ArchiveRecommendation, MyArchiveView } from "../lib/archiveTypes";
 
 const CONFIG = {
   API_BASE: "http://localhost:8000",
@@ -19,7 +21,7 @@ const CONFIG = {
 let sharedAudioContext: window.AudioContext | null = null;
 let audioUnlocked = false;
 
-export type User = { userId: string; phone: string; name: string; age?: number };
+export type User = { userId: string; phone: string; name: string; age?: number; authToken?: string };
 export type ConvoState = "idle" | "userRecording" | "aiThinking" | "aiTalking";
 export type ChatMessage = { id: number; role: "ai" | "user"; text: string };
 export type { BiographyTopic, TopicProfile, TopicStatus };
@@ -34,6 +36,7 @@ export function useStoryEngine() {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [hasBiography, setHasBiography] = useState(false);
   const [topicProfile, setTopicProfile] = useState<TopicProfile | null>(null);
+  const [archive, setArchive] = useState<MyArchiveView | null>(null);
 
   // References for mutable state that doesn't need to trigger renders
   const wsRef = useRef<WebSocket | null>(null);
@@ -57,6 +60,8 @@ export function useStoryEngine() {
   const playbackQueueRef = useRef<AudioBuffer[]>([]);
   const isPlayingRef = useRef(false);
   const currentSourceRef = useRef<window.AudioBufferSourceNode | null>(null);
+  const activeAudioSessionRef = useRef<number | null>(null);
+  const audioSessionCounterRef = useRef(0);
 
   // Expose frequency data for UI visualizer
   const [frequencyData, setFrequencyData] = useState<Uint8Array | null>(null);
@@ -67,6 +72,10 @@ export function useStoryEngine() {
     if (savedUser) {
       try {
         const parsed = JSON.parse(savedUser);
+        if (!parsed.authToken) {
+          localStorage.removeItem("story_user");
+          return;
+        }
         setUser(parsed);
       } catch (e) {
         localStorage.removeItem("story_user");
@@ -74,11 +83,39 @@ export function useStoryEngine() {
     }
   }, []);
 
-  const login = async (phone: string) => {
+  useEffect(() => {
+    if (user) {
+      audioSessionCounterRef.current += 1;
+      activeAudioSessionRef.current = audioSessionCounterRef.current;
+    } else {
+      activeAudioSessionRef.current = null;
+    }
+  }, [user?.userId]);
+
+  const login = async (phone: string, password: string) => {
     const res = await fetch(`${CONFIG.API_BASE}/api/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone }),
+      body: JSON.stringify({ phone, password }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      setUser(result);
+      localStorage.setItem("story_user", JSON.stringify(result));
+      return { success: true };
+    }
+    return {
+      success: false,
+      message: result.message,
+      needSetPassword: result.needSetPassword || false,
+    };
+  };
+
+  const register = async (phone: string, name: string, age: string, password: string) => {
+    const res = await fetch(`${CONFIG.API_BASE}/api/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone, name, age: age ? parseInt(age) : null, password }),
     });
     const result = await res.json();
     if (result.success) {
@@ -89,11 +126,11 @@ export function useStoryEngine() {
     return { success: false, message: result.message };
   };
 
-  const register = async (phone: string, name: string, age: string) => {
-    const res = await fetch(`${CONFIG.API_BASE}/api/register`, {
+  const setPassword = async (phone: string, password: string) => {
+    const res = await fetch(`${CONFIG.API_BASE}/api/users/set-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, name, age: age ? parseInt(age) : null }),
+      body: JSON.stringify({ phone, password }),
     });
     const result = await res.json();
     if (result.success) {
@@ -105,10 +142,16 @@ export function useStoryEngine() {
   };
 
   const logout = () => {
-    localStorage.removeItem("story_user");
-    setUser(null);
-    if (wsRef.current) wsRef.current.close(1000);
+    activeAudioSessionRef.current = null;
     stopRecording(false);
+    stopPlayback();
+    setConvoState("idle");
+    setSubtitle("");
+    setFrequencyData(null);
+    setArchive(null);
+    localStorage.removeItem("story_user");
+    if (wsRef.current) wsRef.current.close(1000);
+    setUser(null);
   };
 
   const fetchStats = async () => {
@@ -133,6 +176,19 @@ export function useStoryEngine() {
       setTopicProfile(profile);
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const fetchArchive = async () => {
+    if (!user) return null;
+    try {
+      const res = await fetch(`${CONFIG.API_BASE}/api/my-archive/${user.userId}`);
+      const data = await res.json();
+      setArchive(data);
+      return data as MyArchiveView;
+    } catch (e) {
+      console.error(e);
+      return null;
     }
   };
 
@@ -188,7 +244,11 @@ export function useStoryEngine() {
       setNetworkStatus("online");
       reconnectAttemptsRef.current = 0;
       if (user) {
-        wsRef.current?.send(JSON.stringify({ type: "login", phone: user.phone }));
+        wsRef.current?.send(JSON.stringify({
+          type: "login",
+          phone: user.phone,
+          authToken: user.authToken,
+        }));
       }
     };
 
@@ -225,6 +285,9 @@ export function useStoryEngine() {
   useEffect(() => {
     if (user) connectWebSocket();
     return () => {
+      activeAudioSessionRef.current = null;
+      stopPlayback();
+      stopRecording(false);
       if (wsRef.current) wsRef.current.close(1000);
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     };
@@ -262,6 +325,7 @@ export function useStoryEngine() {
       if (msg.event === "ai_response_end") {
         setConvoState("idle");
         fetchStats();
+        fetchArchive();
       }
     } catch (e) {
       console.error(e);
@@ -270,17 +334,28 @@ export function useStoryEngine() {
 
   // Handle incoming WS Audio
   const handleAudioMessage = async (arrayBuffer: ArrayBuffer) => {
+    const audioSessionId = activeAudioSessionRef.current;
+    if (!isAudioPlaybackAllowed(audioSessionId, activeAudioSessionRef.current)) return;
+
     const ctx = initAudioContext();
     try {
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      if (!isAudioPlaybackAllowed(audioSessionId, activeAudioSessionRef.current)) return;
+
       playbackQueueRef.current.push(audioBuffer);
-      if (!isPlayingRef.current) playNextInQueue();
+      if (!isPlayingRef.current) playNextInQueue(audioSessionId);
     } catch (e) {
       console.error(e);
     }
   };
 
-  const playNextInQueue = () => {
+  const playNextInQueue = (audioSessionId = activeAudioSessionRef.current) => {
+    if (!isAudioPlaybackAllowed(audioSessionId, activeAudioSessionRef.current)) {
+      stopPlayback();
+      setConvoState("idle");
+      return;
+    }
+
     if (playbackQueueRef.current.length === 0) {
       isPlayingRef.current = false;
       if (convoState === "aiTalking") setConvoState("idle");
@@ -297,7 +372,7 @@ export function useStoryEngine() {
     
     source.onended = () => {
       currentSourceRef.current = null;
-      playNextInQueue();
+      playNextInQueue(audioSessionId);
     };
     
     currentSourceRef.current = source;
@@ -526,6 +601,31 @@ export function useStoryEngine() {
     }
   };
 
+  const activateArchiveRecommendation = async (recommendation: ArchiveRecommendation) => {
+    if (!user) return false;
+    unlockAudioContext();
+
+    setTopicProfile((prev) => {
+      const baseProfile = prev ?? createFallbackTopicProfile(user.userId);
+      return { ...baseProfile, currentTopicId: recommendation.topicId };
+    });
+    setSubtitle(recommendation.question);
+
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+
+    wsRef.current.send(JSON.stringify({
+      type: "start_recommendation_question",
+      topicId: recommendation.topicId,
+      question: recommendation.question,
+      title: recommendation.title,
+      sourceType: recommendation.sourceType,
+      sourceId: recommendation.sourceId,
+    }));
+    return true;
+  };
+
   return {
     user,
     wsConnected,
@@ -534,11 +634,13 @@ export function useStoryEngine() {
     subtitle,
     hasBiography,
     topicProfile,
+    archive,
     userStats,
     chatHistory,
     frequencyData,
     login,
     register,
+    setPassword,
     logout,
     startManualRecord,
     stopManualRecord,
@@ -546,6 +648,8 @@ export function useStoryEngine() {
     stopAutoRecord,
     stopAll,
     selectTopic,
+    fetchArchive,
+    activateArchiveRecommendation,
     unlockAudioContext
   };
 }

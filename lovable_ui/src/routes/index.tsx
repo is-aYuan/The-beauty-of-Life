@@ -9,6 +9,10 @@ import {
   Square,
   Sparkles,
   User,
+  BookOpen,
+  MapPin,
+  MessageCircle,
+  Users,
 } from "lucide-react";
 import { useStoryEngine } from "../hooks/useStoryEngine";
 
@@ -67,6 +71,7 @@ function Index() {
     convoState,
     subtitle,
     topicProfile,
+    archive,
     userStats,
     chatHistory,
     frequencyData,
@@ -76,7 +81,9 @@ function Index() {
     startAutoRecord,
     stopAutoRecord,
     stopAll,
-    selectTopic
+    selectTopic,
+    fetchArchive,
+    activateArchiveRecommendation,
   } = useStoryEngine();
 
   const [activeTab, setActiveTab] = useState<Tab>("story");
@@ -90,7 +97,20 @@ function Index() {
     }
   }, [hasLocalUser, navigate]);
 
+  useEffect(() => {
+    if (activeTab === "organizer" && user) {
+      fetchArchive();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, user?.userId]);
+
   if (!hasLocalUser || !user) return null;
+
+  const handleContinueRecommendation = async () => {
+    if (!archive?.continueRecommendation) return;
+    setActiveTab("story");
+    await activateArchiveRecommendation(archive.continueRecommendation);
+  };
 
   const getTopicStatusLabel = (status: string, progress: number) => {
     if (status === "rich" || progress >= 85) return "素材已丰富";
@@ -141,7 +161,144 @@ function Index() {
         className="flex w-[55%] flex-col rounded-3xl bg-amber-50 p-8 relative"
         style={{ boxShadow: "inset 0 4px 24px rgba(120, 72, 30, 0.18)" }}
       >
-        {activeTab !== "story" ? (
+        {activeTab === "organizer" ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <header className="border-b-2 border-amber-200 pb-5">
+              <h2 className="text-4xl font-bold text-stone-800">AI 整理</h2>
+              <p className="mt-2 text-xl text-stone-600">
+                AI 帮您把刚刚讲过的回忆收好
+              </p>
+            </header>
+
+            <div className="flex-1 space-y-5 overflow-y-auto py-5 pr-2">
+              {!archive ? (
+                <div className="rounded-2xl bg-white/80 p-6 text-center shadow-sm">
+                  <p className="text-xl text-stone-600">正在整理您的回忆...</p>
+                </div>
+              ) : (
+                <>
+                  <section className="rounded-2xl bg-white p-5 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <Sparkles className="h-7 w-7 text-amber-600" />
+                      <h3 className="text-2xl font-bold text-stone-800">今天整理</h3>
+                    </div>
+                    {archive.todayDigest.items.length > 0 ? (
+                      <div className="mt-4 space-y-3">
+                        {archive.todayDigest.items.map((item) => (
+                          <div key={`${item.type}-${item.title}`} className="rounded-xl bg-amber-50 p-4">
+                            <p className="text-xl font-bold text-stone-800">{item.title}</p>
+                            <p className="mt-1 text-lg leading-relaxed text-stone-600">{item.text}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-4 text-lg leading-relaxed text-stone-600">
+                        今天还没有整理出新的故事。您可以先从右侧选择一个主题开始讲。
+                      </p>
+                    )}
+
+                    {archive.continueRecommendation && (
+                      <div className="mt-5 rounded-2xl bg-amber-100 p-4">
+                        <p className="text-lg font-semibold text-stone-600">继续讲讲</p>
+                        <p className="mt-2 text-2xl font-bold leading-relaxed text-stone-900">
+                          {archive.continueRecommendation.question}
+                        </p>
+                        <button
+                          onClick={handleContinueRecommendation}
+                          className="mt-4 flex items-center gap-2 rounded-xl bg-stone-800 px-5 py-3 text-lg font-bold text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
+                        >
+                          <MessageCircle className="h-5 w-5" />
+                          继续讲这个
+                        </button>
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="rounded-2xl bg-white p-5 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <BookOpen className="h-7 w-7 text-amber-700" />
+                      <h3 className="text-2xl font-bold text-stone-800">故事片段</h3>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {archive.storySnippets.length > 0 ? (
+                        archive.storySnippets.map((story) => (
+                          <article key={`${story.sourceId}-${story.title}`} className="rounded-xl bg-amber-50/80 p-4">
+                            <p className="text-xl font-bold text-stone-800">{story.title}</p>
+                            <p className="mt-1 text-lg leading-relaxed text-stone-600">{story.text}</p>
+                          </article>
+                        ))
+                      ) : (
+                        <p className="text-lg text-stone-600">故事片段还在积累中。</p>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="rounded-2xl bg-white p-5 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <Users className="h-7 w-7 text-amber-700" />
+                      <h3 className="text-2xl font-bold text-stone-800">重要的人和地方</h3>
+                    </div>
+                    <div className="mt-4 space-y-4">
+                      <div>
+                        <p className="mb-2 text-lg font-semibold text-stone-600">人物</p>
+                        <div className="flex flex-wrap gap-2">
+                          {archive.peopleAndPlaces.people.length > 0 ? (
+                            archive.peopleAndPlaces.people.map((person) => (
+                              <span key={person.name} className="rounded-full bg-amber-100 px-4 py-2 text-lg font-semibold text-stone-700">
+                                {person.name}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-lg text-stone-500">还没有记录重要人物</span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="mb-2 flex items-center gap-2 text-lg font-semibold text-stone-600">
+                          <MapPin className="h-5 w-5" />
+                          地方
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {archive.peopleAndPlaces.places.length > 0 ? (
+                            archive.peopleAndPlaces.places.map((place) => (
+                              <span key={place.name} className="rounded-full bg-stone-100 px-4 py-2 text-lg font-semibold text-stone-700">
+                                {place.name}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-lg text-stone-500">还没有记录重要地点</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-2xl bg-white p-5 shadow-sm">
+                    <div className="flex items-center justify-between gap-4">
+                      <h3 className="text-2xl font-bold text-stone-800">原始记录</h3>
+                      <span className="text-lg font-semibold text-stone-500">
+                        共 {archive.rawRecordPreview.total} 条
+                      </span>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {archive.rawRecordPreview.latest.length > 0 ? (
+                        archive.rawRecordPreview.latest.map((record) => (
+                          <div key={record.id || `${record.topicId}-${record.userText}`} className="rounded-xl bg-stone-50 p-4">
+                            <p className="text-base font-semibold text-stone-500">{record.topicTitle || "未标记主题"}</p>
+                            <p className="mt-1 text-lg text-stone-700">老人说：{record.userText || "（AI 推荐问题）"}</p>
+                            <p className="mt-1 text-lg text-stone-600">AI：{record.aiReply}</p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-lg text-stone-600">还没有原始记录。</p>
+                      )}
+                    </div>
+                  </section>
+                </>
+              )}
+            </div>
+          </div>
+        ) : activeTab !== "story" ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center">
             <h2 className="text-4xl font-bold text-stone-800">
               {TAB_TITLES[activeTab]}
