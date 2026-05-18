@@ -54,7 +54,7 @@ function LoginPage() {
     
     setIsLoading(false);
     if (result.success) {
-      navigate({ to: "/" });
+      navigate({ to: "/mic-setup" });
     } else if (result.needSetPassword) {
       setNeedsPasswordSetup(true);
       setPassword("");
