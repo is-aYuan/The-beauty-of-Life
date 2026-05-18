@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Mic,
   Bot,
@@ -14,6 +14,7 @@ import {
   MessageCircle,
   Users,
 } from "lucide-react";
+import { useChatAutoScroll } from "../lib/chatAutoScroll";
 import { useStoryEngine } from "../hooks/useStoryEngine";
 
 export const Route = createFileRoute("/")({
@@ -25,14 +26,14 @@ type RecordMode = "hold" | "table";
 
 const NAV_ITEMS: { id: Tab; label: string; icon: typeof Mic }[] = [
   { id: "story", label: "讲我的故事", icon: Mic },
-  { id: "organizer", label: "AI 整理", icon: Bot },
+  { id: "organizer", label: "回忆库", icon: Bot },
   { id: "family", label: "亲情连接", icon: Heart },
   { id: "settings", label: "设置", icon: SettingsIcon },
 ];
 
 const TAB_TITLES: Record<Tab, string> = {
   story: "讲我的故事",
-  organizer: "AI 整理",
+  organizer: "回忆库",
   family: "亲情连接",
   settings: "设置",
 };
@@ -88,6 +89,8 @@ function Index() {
 
   const [activeTab, setActiveTab] = useState<Tab>("story");
   const [recordMode, setRecordMode] = useState<RecordMode>("hold");
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const hasLocalUser = !!localStorage.getItem("story_user");
 
@@ -103,6 +106,15 @@ function Index() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, user?.userId]);
+
+  useChatAutoScroll({
+    activeTab,
+    chatHistoryLength: chatHistory.length,
+    subtitle,
+    convoState,
+    scrollContainerRef: chatScrollRef,
+    latestMessageRef: chatEndRef,
+  });
 
   if (!hasLocalUser || !user) return null;
 
@@ -164,7 +176,7 @@ function Index() {
         {activeTab === "organizer" ? (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <header className="border-b-2 border-amber-200 pb-5">
-              <h2 className="text-4xl font-bold text-stone-800">AI 整理</h2>
+              <h2 className="text-4xl font-bold text-stone-800">回忆库</h2>
               <p className="mt-2 text-xl text-stone-600">
                 AI 帮您把刚刚讲过的回忆收好
               </p>
@@ -322,7 +334,7 @@ function Index() {
             </header>
 
             {/* Scrollable chat log */}
-            <div className="flex-1 space-y-6 overflow-y-auto p-6">
+            <div ref={chatScrollRef} className="flex-1 space-y-6 overflow-y-auto p-6">
               {chatHistory.map((m) =>
                 m.role === "ai" ? (
                   <div key={m.id} className="flex items-start gap-4">
@@ -373,6 +385,7 @@ function Index() {
                   </div>
                 </div>
               )}
+              <div ref={chatEndRef} aria-hidden="true" />
             </div>
 
             {/* Sticky bottom control panel */}
