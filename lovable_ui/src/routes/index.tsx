@@ -10,11 +10,14 @@ import {
   Sparkles,
   User,
   BookOpen,
-  MapPin,
-  MessageCircle,
-  Users,
 } from "lucide-react";
 import { useChatAutoScroll } from "../lib/chatAutoScroll";
+import {
+  buildBiographyGenerationDecision,
+  getLatestBiography,
+} from "../lib/biographyGeneration.js";
+import { buildEntryGuidance } from "../lib/entryGuidance.js";
+import { buildMemoirTitle } from "../lib/memoirTitle.js";
 import { useStoryEngine } from "../hooks/useStoryEngine";
 
 export const Route = createFileRoute("/")({
@@ -63,6 +66,21 @@ function MiniVisualizer({ freqData }: { freqData: Uint8Array | null }) {
   );
 }
 
+function formatArchiveDate(value: unknown) {
+  if (!value) return "";
+  if (typeof value === "string") return new Date(value).toLocaleDateString("zh-CN");
+  if (typeof value === "number") return new Date(value).toLocaleDateString("zh-CN");
+  if (value instanceof Date) return value.toLocaleDateString("zh-CN");
+  if (typeof value === "object") {
+    const maybeTimestamp = value as { _seconds?: number; seconds?: number };
+    const seconds = maybeTimestamp._seconds ?? maybeTimestamp.seconds;
+    if (typeof seconds === "number") {
+      return new Date(seconds * 1000).toLocaleDateString("zh-CN");
+    }
+  }
+  return "";
+}
+
 function Index() {
   const navigate = useNavigate();
   const {
@@ -73,6 +91,7 @@ function Index() {
     subtitle,
     topicProfile,
     archive,
+    biographies,
     userStats,
     chatHistory,
     frequencyData,
@@ -84,11 +103,14 @@ function Index() {
     stopAll,
     selectTopic,
     fetchArchive,
+    fetchBiographies,
+    generateBiography,
     activateArchiveRecommendation,
   } = useStoryEngine();
 
   const [activeTab, setActiveTab] = useState<Tab>("story");
   const [recordMode, setRecordMode] = useState<RecordMode>("hold");
+  const [biographyGenerating, setBiographyGenerating] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -103,6 +125,7 @@ function Index() {
   useEffect(() => {
     if (activeTab === "organizer" && user) {
       fetchArchive();
+      fetchBiographies();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, user?.userId]);
@@ -118,11 +141,24 @@ function Index() {
 
   if (!hasLocalUser || !user) return null;
 
-  const handleContinueRecommendation = async () => {
-    if (!archive?.continueRecommendation) return;
-    setActiveTab("story");
-    await activateArchiveRecommendation(archive.continueRecommendation);
-  };
+  const currentTopic = topicProfile?.topics.find(
+    (topic) => topic.id === topicProfile.currentTopicId,
+  );
+  const latestBiography = getLatestBiography(biographies);
+  const biographyDecision = buildBiographyGenerationDecision({
+    topics: topicProfile?.topics || [],
+    biographies,
+  });
+  // 模块：入口引导状态。首页所有“开始/继续”提示统一从这里取，避免新用户误看到继续语气。
+  const entryGuidance = buildEntryGuidance({
+    userName: user.name,
+    totalConversations: userStats.totalConversations,
+    chatHistoryLength: chatHistory.length,
+    currentTopicTitle: currentTopic?.title,
+    wsConnected,
+    networkStatus,
+    subtitle,
+  });
 
   const getTopicStatusLabel = (status: string, progress: number) => {
     if (status === "rich" || progress >= 85) return "素材已丰富";
@@ -130,6 +166,30 @@ function Index() {
     if (status === "has_story") return "已有故事";
     if (status === "started") return "刚刚开始";
     return "还没开始";
+  };
+
+  const handleGenerateBiography = async () => {
+    if (!biographyDecision.canGenerate) {
+      window.alert(biographyDecision.message);
+      return;
+    }
+
+    if (biographyDecision.requiresConfirmation && !window.confirm(biographyDecision.message)) {
+      return;
+    }
+
+    setBiographyGenerating(true);
+    try {
+      const result = await generateBiography();
+      if (!result.success) {
+        window.alert(result.error || "生成回忆录失败，请稍后再试。");
+        return;
+      }
+      await fetchArchive();
+      window.alert("回忆录已经整理好了，您可以在回忆库里慢慢查看。");
+    } finally {
+      setBiographyGenerating(false);
+    }
   };
 
   return (
@@ -190,39 +250,54 @@ function Index() {
               ) : (
                 <>
                   <section className="rounded-2xl bg-white p-5 shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <Sparkles className="h-7 w-7 text-amber-600" />
-                      <h3 className="text-2xl font-bold text-stone-800">今天整理</h3>
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <BookOpen className="h-7 w-7 text-amber-700" />
+                        <h3 className="text-2xl font-bold text-stone-800">我的回忆录</h3>
+                      </div>
+                      <button
+                        onClick={handleGenerateBiography}
+                        disabled={biographyGenerating}
+                        className="flex items-center gap-2 rounded-xl bg-stone-800 px-5 py-3 text-lg font-bold text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
+                      >
+                        <Sparkles className={`h-5 w-5 ${biographyGenerating ? "animate-spin" : ""}`} />
+                        {biographyGenerating ? "正在整理..." : "生成最新回忆录"}
+                      </button>
                     </div>
-                    {archive.todayDigest.items.length > 0 ? (
-                      <div className="mt-4 space-y-3">
-                        {archive.todayDigest.items.map((item) => (
-                          <div key={`${item.type}-${item.title}`} className="rounded-xl bg-amber-50 p-4">
-                            <p className="text-xl font-bold text-stone-800">{item.title}</p>
-                            <p className="mt-1 text-lg leading-relaxed text-stone-600">{item.text}</p>
+
+                    {latestBiography ? (
+                      <div className="mt-5 space-y-4">
+                        <div className="rounded-xl bg-amber-50 p-4">
+                          <p className="text-2xl font-bold text-stone-900">《{latestBiography.title || "我的回忆录"}》</p>
+                          <p className="mt-2 text-lg text-stone-600">
+                            {formatArchiveDate(latestBiography.updatedAt || latestBiography.createdAt) || "最近整理"}
+                            {latestBiography.chapterCount ? ` · ${latestBiography.chapterCount} 章` : ""}
+                            {latestBiography.wordCount ? ` · 约 ${latestBiography.wordCount} 字` : ""}
+                          </p>
+                        </div>
+                        {(latestBiography.chapters || []).length > 0 ? (
+                          <div className="space-y-3">
+                            {(latestBiography.chapters || []).map((chapter) => (
+                              <article key={`${chapter.number}-${chapter.title}`} className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-amber-100">
+                                <p className="text-xl font-bold text-stone-800">
+                                  第 {chapter.number} 章：{chapter.title}
+                                </p>
+                                <p className="mt-2 whitespace-pre-wrap text-lg leading-relaxed text-stone-600">
+                                  {chapter.content}
+                                </p>
+                              </article>
+                            ))}
                           </div>
-                        ))}
+                        ) : (
+                          <p className="rounded-xl bg-amber-50 p-4 text-lg text-stone-600">
+                            回忆录已经生成，章节内容正在整理展示中。
+                          </p>
+                        )}
                       </div>
                     ) : (
                       <p className="mt-4 text-lg leading-relaxed text-stone-600">
-                        今天还没有整理出新的故事。您可以先从右侧选择一个主题开始讲。
+                        还没有生成回忆录。等至少一个主题进度达到 80% 后，我就可以帮您整理成一版故事。
                       </p>
-                    )}
-
-                    {archive.continueRecommendation && (
-                      <div className="mt-5 rounded-2xl bg-amber-100 p-4">
-                        <p className="text-lg font-semibold text-stone-600">继续讲讲</p>
-                        <p className="mt-2 text-2xl font-bold leading-relaxed text-stone-900">
-                          {archive.continueRecommendation.question}
-                        </p>
-                        <button
-                          onClick={handleContinueRecommendation}
-                          className="mt-4 flex items-center gap-2 rounded-xl bg-stone-800 px-5 py-3 text-lg font-bold text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
-                        >
-                          <MessageCircle className="h-5 w-5" />
-                          继续讲这个
-                        </button>
-                      </div>
                     )}
                   </section>
 
@@ -244,68 +319,6 @@ function Index() {
                       )}
                     </div>
                   </section>
-
-                  <section className="rounded-2xl bg-white p-5 shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <Users className="h-7 w-7 text-amber-700" />
-                      <h3 className="text-2xl font-bold text-stone-800">重要的人和地方</h3>
-                    </div>
-                    <div className="mt-4 space-y-4">
-                      <div>
-                        <p className="mb-2 text-lg font-semibold text-stone-600">人物</p>
-                        <div className="flex flex-wrap gap-2">
-                          {archive.peopleAndPlaces.people.length > 0 ? (
-                            archive.peopleAndPlaces.people.map((person) => (
-                              <span key={person.name} className="rounded-full bg-amber-100 px-4 py-2 text-lg font-semibold text-stone-700">
-                                {person.name}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-lg text-stone-500">还没有记录重要人物</span>
-                          )}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="mb-2 flex items-center gap-2 text-lg font-semibold text-stone-600">
-                          <MapPin className="h-5 w-5" />
-                          地方
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {archive.peopleAndPlaces.places.length > 0 ? (
-                            archive.peopleAndPlaces.places.map((place) => (
-                              <span key={place.name} className="rounded-full bg-stone-100 px-4 py-2 text-lg font-semibold text-stone-700">
-                                {place.name}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-lg text-stone-500">还没有记录重要地点</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-
-                  <section className="rounded-2xl bg-white p-5 shadow-sm">
-                    <div className="flex items-center justify-between gap-4">
-                      <h3 className="text-2xl font-bold text-stone-800">原始记录</h3>
-                      <span className="text-lg font-semibold text-stone-500">
-                        共 {archive.rawRecordPreview.total} 条
-                      </span>
-                    </div>
-                    <div className="mt-4 space-y-3">
-                      {archive.rawRecordPreview.latest.length > 0 ? (
-                        archive.rawRecordPreview.latest.map((record) => (
-                          <div key={record.id || `${record.topicId}-${record.userText}`} className="rounded-xl bg-stone-50 p-4">
-                            <p className="text-base font-semibold text-stone-500">{record.topicTitle || "未标记主题"}</p>
-                            <p className="mt-1 text-lg text-stone-700">老人说：{record.userText || "（AI 推荐问题）"}</p>
-                            <p className="mt-1 text-lg text-stone-600">AI：{record.aiReply}</p>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-lg text-stone-600">还没有原始记录。</p>
-                      )}
-                    </div>
-                  </section>
                 </>
               )}
             </div>
@@ -323,7 +336,7 @@ function Index() {
           <div className="flex flex-1 flex-col overflow-hidden">
             <header className="border-b-2 border-amber-200 pb-5">
               <h2 className="text-4xl font-bold text-stone-800">
-                我的回忆录 —— {user.name}爷爷/奶奶
+                {buildMemoirTitle(user.name)}
               </h2>
               <p className="mt-2 text-xl text-stone-600">
                 今日陪伴
@@ -365,10 +378,10 @@ function Index() {
               )}
 
               {/* Subtitle from stream */}
-              {subtitle && convoState !== "userRecording" && convoState !== "aiTalking" && (
+              {entryGuidance.storyPrompt && convoState !== "userRecording" && convoState !== "aiTalking" && (
                 <div className="flex items-start gap-4 pt-4 border-t border-amber-200/50">
                    <div className="max-w-[100%] bg-blue-50/50 p-4 rounded-xl border border-blue-100/50">
-                     <p className="text-2xl leading-relaxed text-blue-800">{subtitle}</p>
+                     <p className="text-2xl leading-relaxed text-blue-800">{entryGuidance.storyPrompt}</p>
                    </div>
                 </div>
               )}
@@ -436,7 +449,7 @@ function Index() {
                   </p>
                 ) : (
                   <p className="text-xl font-medium text-stone-700">
-                    {wsConnected ? "请点击开始讲述" : "正在连接..."}
+                    {entryGuidance.idleStatus}
                   </p>
                 )}
               </div>

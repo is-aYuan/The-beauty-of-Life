@@ -57,7 +57,7 @@ test('includes a gentle richness rule for topics at or above 85 percent', () => 
     assert.match(prompt, /允许老人继续讲/);
 });
 
-test('guides AI to ask only one missing elder profile field and avoid repeated questions', () => {
+test('deprioritizes sensitive profile fields and avoids registry-style questions', () => {
     const profile = createDefaultTopicProfile('user_1');
     profile.currentTopicId = 'childhood';
     profile.personProfile = {
@@ -70,7 +70,10 @@ test('guides AI to ask only one missing elder profile field and avoid repeated q
     assert.match(prompt, /基础档案补充/);
     assert.match(prompt, /已知基础档案：籍贯\/老家：河南；年龄：78/);
     assert.match(prompt, /仍缺：性别、民族/);
-    assert.match(prompt, /优先只自然询问「性别」/);
+    assert.match(prompt, /不要在开场主动追问性别、民族/);
+    assert.match(prompt, /禁止问“您小时候是男孩还是女孩/);
+    assert.match(prompt, /优先从地点、家人、场景、日常生活、印象深的人或事开始/);
+    assert.doesNotMatch(prompt, /优先只自然询问「性别」/);
     assert.match(prompt, /老人可以跳过/);
     assert.match(prompt, /不要重复询问已知字段/);
 });

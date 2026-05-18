@@ -42,6 +42,25 @@ export type ArchiveRecordPreview = {
   timestamp: string | null;
 };
 
+export type BiographyChapter = {
+  number: number;
+  title: string;
+  content: string;
+};
+
+export type BiographyBook = {
+  _id?: string;
+  title: string;
+  tier?: string;
+  chapters?: BiographyChapter[];
+  fullText?: string;
+  wordCount?: number;
+  chapterCount?: number;
+  status?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+};
+
 export type MyArchiveView = {
   todayDigest: {
     items: ArchiveDigestItem[];

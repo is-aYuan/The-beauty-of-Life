@@ -6,7 +6,7 @@ import {
   type TopicStatus,
 } from "../lib/biographyTopics";
 import { isAudioPlaybackAllowed } from "../lib/audioSessionGuard";
-import type { ArchiveRecommendation, MyArchiveView } from "../lib/archiveTypes";
+import type { ArchiveRecommendation, BiographyBook, MyArchiveView } from "../lib/archiveTypes";
 
 const CONFIG = {
   API_BASE: "http://localhost:8000",
@@ -37,6 +37,7 @@ export function useStoryEngine() {
   const [hasBiography, setHasBiography] = useState(false);
   const [topicProfile, setTopicProfile] = useState<TopicProfile | null>(null);
   const [archive, setArchive] = useState<MyArchiveView | null>(null);
+  const [biographies, setBiographies] = useState<BiographyBook[]>([]);
 
   // References for mutable state that doesn't need to trigger renders
   const wsRef = useRef<WebSocket | null>(null);
@@ -149,6 +150,7 @@ export function useStoryEngine() {
     setSubtitle("");
     setFrequencyData(null);
     setArchive(null);
+    setBiographies([]);
     localStorage.removeItem("story_user");
     if (wsRef.current) wsRef.current.close(1000);
     setUser(null);
@@ -192,11 +194,26 @@ export function useStoryEngine() {
     }
   };
 
+  const fetchBiographies = async () => {
+    if (!user) return [];
+    try {
+      const res = await fetch(`${CONFIG.API_BASE}/api/biographies/${user.userId}`);
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : [];
+      setBiographies(list);
+      return list as BiographyBook[];
+    } catch (e) {
+      console.error(e);
+      return [];
+    }
+  };
+
   useEffect(() => {
     if (user) {
       setTopicProfile((prev) => prev ?? createFallbackTopicProfile(user.userId));
       fetchStats();
       fetchTopicProfile();
+      fetchBiographies();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
@@ -626,6 +643,24 @@ export function useStoryEngine() {
     return true;
   };
 
+  const generateBiography = async () => {
+    if (!user) return { success: false, error: "请先登录" };
+    try {
+      const res = await fetch(`${CONFIG.API_BASE}/api/biographies/${user.userId}/generate`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchBiographies();
+        return { success: true, ...data };
+      }
+      return { success: false, error: data.error || "生成回忆录失败" };
+    } catch (e) {
+      console.error(e);
+      return { success: false, error: "网络错误，请稍后再试" };
+    }
+  };
+
   return {
     user,
     wsConnected,
@@ -635,6 +670,7 @@ export function useStoryEngine() {
     hasBiography,
     topicProfile,
     archive,
+    biographies,
     userStats,
     chatHistory,
     frequencyData,
@@ -649,6 +685,8 @@ export function useStoryEngine() {
     stopAll,
     selectTopic,
     fetchArchive,
+    fetchBiographies,
+    generateBiography,
     activateArchiveRecommendation,
     unlockAudioContext
   };
