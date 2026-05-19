@@ -54,6 +54,9 @@ export type BiographyBook = {
   tier?: string;
   chapters?: BiographyChapter[];
   fullText?: string;
+  style?: string;
+  styleLabel?: string;
+  styleDescription?: string;
   wordCount?: number;
   chapterCount?: number;
   status?: string;

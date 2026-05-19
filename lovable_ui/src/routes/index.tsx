@@ -10,6 +10,7 @@ import {
   Sparkles,
   User,
   BookOpen,
+  X,
 } from "lucide-react";
 import { useChatAutoScroll } from "../lib/chatAutoScroll";
 import {
@@ -17,6 +18,11 @@ import {
   getLatestBiography,
 } from "../lib/biographyGeneration.js";
 import { buildEntryGuidance } from "../lib/entryGuidance.js";
+import {
+  BIOGRAPHY_STYLE_OPTIONS,
+  DEFAULT_BIOGRAPHY_STYLE_ID,
+  type BiographyStyleId,
+} from "../lib/biographyStyles.js";
 import { buildMemoirTitle } from "../lib/memoirTitle.js";
 import { useStoryEngine } from "../hooks/useStoryEngine";
 
@@ -111,6 +117,7 @@ function Index() {
   const [activeTab, setActiveTab] = useState<Tab>("story");
   const [recordMode, setRecordMode] = useState<RecordMode>("hold");
   const [biographyGenerating, setBiographyGenerating] = useState(false);
+  const [styleDialogOpen, setStyleDialogOpen] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -178,9 +185,14 @@ function Index() {
       return;
     }
 
+    setStyleDialogOpen(true);
+  };
+
+  const handleSelectBiographyStyle = async (style: BiographyStyleId) => {
+    setStyleDialogOpen(false);
     setBiographyGenerating(true);
     try {
-      const result = await generateBiography();
+      const result = await generateBiography(style);
       if (!result.success) {
         window.alert(result.error || "生成回忆录失败，请稍后再试。");
         return;
@@ -577,6 +589,58 @@ function Index() {
           })}
         </div>
       </aside>
+
+      {styleDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/55 p-6">
+          <div className="w-full max-w-2xl rounded-3xl bg-white p-7 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-black text-stone-900">选择回忆录文风</h2>
+                <p className="mt-2 text-base leading-relaxed text-stone-500">
+                  请选择这次生成回忆录的表达方式。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStyleDialogOpen(false)}
+                className="rounded-full border border-stone-200 p-2 text-stone-400 hover:bg-stone-50"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-3 md:grid-cols-2">
+              {BIOGRAPHY_STYLE_OPTIONS.map((style) => {
+                const recommended = style.id === DEFAULT_BIOGRAPHY_STYLE_ID;
+                return (
+                  <button
+                    key={style.id}
+                    type="button"
+                    onClick={() => handleSelectBiographyStyle(style.id)}
+                    className={`rounded-2xl border p-5 text-left transition-transform hover:scale-[1.02] active:scale-[0.98] ${
+                      recommended
+                        ? "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
+                        : "border-stone-200 bg-white hover:bg-stone-50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xl font-black text-stone-900">{style.label}</p>
+                      {recommended && (
+                        <span className="rounded-full bg-amber-600 px-2.5 py-1 text-xs font-bold text-white">
+                          默认
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-2 text-base leading-relaxed text-stone-600">
+                      {style.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

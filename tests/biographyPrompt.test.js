@@ -35,6 +35,29 @@ test('builds biography prompt with account name as the highest-priority identity
     assert.match(prompt, /自传第一人称必须是郑远/);
 });
 
+test('injects the selected biography writing style into the generation prompt', () => {
+    const prompt = buildBiographyUserPrompt({
+        accountName: '郑远',
+        styleId: 'family_letter',
+        tier: { chapterRange: [5, 6], wordsPerChapter: [500, 800] },
+        summaries: [
+            {
+                narratives: [
+                    {
+                        theme: '家人',
+                        title: '给家人的话',
+                        content: '用户想把自己的经历讲给家人。',
+                    },
+                ],
+            },
+        ],
+    });
+
+    assert.match(prompt, /## 本次回忆录文风：家书口吻/);
+    assert.match(prompt, /跨越时空的私密呢喃/);
+    assert.doesNotMatch(prompt, /<think>/);
+});
+
 test('rejects generated biography when first-person identity conflicts with account name', () => {
     const result = validateBiographyIdentity({
         accountName: '郑远',

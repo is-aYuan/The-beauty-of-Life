@@ -643,11 +643,13 @@ export function useStoryEngine() {
     return true;
   };
 
-  const generateBiography = async () => {
+  const generateBiography = async (style?: string) => {
     if (!user) return { success: false, error: "请先登录" };
     try {
       const res = await fetch(`${CONFIG.API_BASE}/api/biographies/${user.userId}/generate`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ style }),
       });
       const data = await res.json();
       if (data.success) {

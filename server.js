@@ -59,6 +59,12 @@ const {
     buildBiographyGenerationDecision,
     getLatestBiography,
 } = require('./lib/biographyGeneration');
+const {
+    buildAdminTopicProfileResponse,
+} = require('./lib/adminTopicProfile');
+const {
+    getBiographyStyle,
+} = require('./lib/biographyStyles');
 
 // ==================== CloudBase 初始化 ====================
 const cloudbase = require('@cloudbase/node-sdk');
@@ -1119,6 +1125,7 @@ function getBiographyTier(totalWordCount) {
  */
 async function generateBiography(userId, options = {}) {
     const enforceProgressGate = options.enforceProgressGate !== false;
+    const biographyStyle = getBiographyStyle(options.style);
     console.log(`[自传] 开始为用户 ${userId} 生成自传...`);
 
     const topicProfile = await getOrCreateTopicProfile(userId);
@@ -1159,6 +1166,7 @@ async function generateBiography(userId, options = {}) {
     // 4. 构建用户指令。账号姓名是传主身份最高优先级，摘要里的姓名只能作为低可信参考。
     const userPrompt = buildBiographyUserPrompt({
         accountName,
+        styleId: biographyStyle.id,
         tier,
         summaries,
         memoryProfile,
@@ -1173,7 +1181,8 @@ async function generateBiography(userId, options = {}) {
             { role: 'system', content: BIOGRAPHY_SYSTEM_PROMPT },
             { role: 'user', content: userPrompt },
         ],
-        temperature: 0.5,
+        temperature: biographyStyle.temperature,
+        top_p: biographyStyle.topP,
         response_format: { type: 'json_object' },
     });
 
@@ -1215,6 +1224,9 @@ async function generateBiography(userId, options = {}) {
         userId,
         title: bioData.title || '人生故事',
         tier: tier.name,
+        style: biographyStyle.id,
+        styleLabel: biographyStyle.label,
+        styleDescription: biographyStyle.description,
         chapters,
         fullText,
         wordCount,
@@ -1245,9 +1257,20 @@ async function generateBiography(userId, options = {}) {
         biographyId,
         title: bioData.title,
         tier: tier.name,
+        style: biographyStyle.id,
+        styleLabel: biographyStyle.label,
         chapterCount: chapters.length,
         wordCount,
     };
+}
+
+function parseJsonBody(rawBody) {
+    if (!rawBody) return {};
+    try {
+        return JSON.parse(rawBody);
+    } catch {
+        return {};
+    }
 }
 
 // ==================== 本地音频文件存储 ====================
@@ -1541,7 +1564,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.match(/^\/api\/biographies\/[^/]+\/generate$/) && req.method === 'POST') {
         const userId = url.pathname.split('/')[3];
         try {
-            const result = await generateBiography(userId);
+            const body = parseJsonBody(await getRequestBody(req));
+            const result = await generateBiography(userId, { style: body.style });
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true, ...result }));
         } catch (err) {
@@ -1689,6 +1713,21 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
+        // 管理员：获取用户主题采访进度
+        const topicProfileMatch = url.pathname.match(/^\/api\/admin\/user\/([^/]+)\/topic-profile$/);
+        if (topicProfileMatch && req.method === 'GET') {
+            try {
+                const userId = topicProfileMatch[1];
+                const profile = await getOrCreateTopicProfile(userId);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(buildAdminTopicProfileResponse(profile, userId)));
+            } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: err.message }));
+            }
+            return;
+        }
+
         // 管理员：获取用户自传列表
         const adminBioMatch = url.pathname.match(/^\/api\/admin\/user\/([^/]+)\/biographies$/);
         if (adminBioMatch && req.method === 'GET') {
@@ -1707,7 +1746,11 @@ const server = http.createServer(async (req, res) => {
         const adminBioGenMatch = url.pathname.match(/^\/api\/admin\/user\/([^/]+)\/biographies\/generate$/);
         if (adminBioGenMatch && req.method === 'POST') {
             try {
-                const result = await generateBiography(adminBioGenMatch[1], { enforceProgressGate: false });
+                const body = parseJsonBody(await getRequestBody(req));
+                const result = await generateBiography(adminBioGenMatch[1], {
+                    enforceProgressGate: false,
+                    style: body.style,
+                });
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: true, ...result }));
             } catch (err) {
