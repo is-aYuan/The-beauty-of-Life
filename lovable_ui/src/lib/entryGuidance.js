@@ -11,7 +11,7 @@ function isFirstTimeUser(input) {
 function buildOnboardingPrompt(input) {
   const topicTitle = normalizeText(input.currentTopicTitle) || DEFAULT_TOPIC_TITLE;
 
-  return `我们先从“${topicTitle}”开始吧。按住下面的话筒，像聊天一样讲。`;
+  return `我们可以先从“${topicTitle}”开始。您也可以在右边选择其他想聊的主题。选好后，按住下面的话筒，像聊天一样讲。`;
 }
 
 function normalizeServerEntryGuidance(value) {

@@ -25,9 +25,10 @@ test('builds first-time guidance with childhood selected and concise display cop
     assert.equal(guidance.shouldAutoSpeak, true);
     assert.equal(
         guidance.displayText,
-        '我们先从“我的孩童时代”开始吧。按住下面的话筒，像聊天一样讲。',
+        '我们可以先从“我的孩童时代”开始。您也可以在右边选择其他想聊的主题。选好后，按住下面的话筒，像聊天一样讲。',
     );
     assert.match(guidance.speechText, /您好，胡敏先。/);
+    assert.match(guidance.speechText, /也可以在右边选择其他想聊的主题/);
     assert.match(guidance.speechText, /我会帮您慢慢整理成回忆录/);
 });
 

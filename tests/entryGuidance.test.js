@@ -14,7 +14,7 @@ test('shows onboarding guidance instead of continuation copy for first-time user
         subtitle: '您好，胡敏先！请继续讲您的故事，我会帮您记录下来。',
     });
 
-    assert.equal(guidance.storyPrompt, '我们先从“我的孩童时代”开始吧。按住下面的话筒，像聊天一样讲。');
+    assert.equal(guidance.storyPrompt, '我们可以先从“我的孩童时代”开始。您也可以在右边选择其他想聊的主题。选好后，按住下面的话筒，像聊天一样讲。');
     assert.doesNotMatch(guidance.storyPrompt, /继续/);
     assert.equal(guidance.idleStatus, '按住红色按钮，说一段回忆');
 });
