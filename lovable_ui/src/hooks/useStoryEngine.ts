@@ -31,6 +31,10 @@ let audioUnlocked = false;
 export type User = { userId: string; phone: string; name: string; age?: number; authToken?: string };
 export type ConvoState = "idle" | "userRecording" | "aiThinking" | "aiTalking";
 export type ChatMessage = { id: number; role: "ai" | "user"; text: string };
+export type LegalConsentInput = {
+  acceptedLegalTerms: boolean;
+  acceptedPersonalInfoProcessing: boolean;
+};
 export type ServerEntryGuidance = {
   mode: "new_user" | "returning_user";
   topicId: string;
@@ -119,11 +123,11 @@ export function useStoryEngine() {
     }
   }, [user?.userId]);
 
-  const login = async (phone: string, password: string) => {
+  const login = async (phone: string, password: string, consent: LegalConsentInput) => {
     const res = await fetch(`${CONFIG.API_BASE}/api/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, password }),
+      body: JSON.stringify({ phone, password, consent }),
     });
     const result = await res.json();
     if (result.success) {
@@ -138,11 +142,17 @@ export function useStoryEngine() {
     };
   };
 
-  const register = async (phone: string, name: string, age: string, password: string) => {
+  const register = async (
+    phone: string,
+    name: string,
+    age: string,
+    password: string,
+    consent: LegalConsentInput,
+  ) => {
     const res = await fetch(`${CONFIG.API_BASE}/api/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, name, age: age ? parseInt(age) : null, password }),
+      body: JSON.stringify({ phone, name, age: age ? parseInt(age) : null, password, consent }),
     });
     const result = await res.json();
     if (result.success) {
@@ -153,11 +163,11 @@ export function useStoryEngine() {
     return { success: false, message: result.message };
   };
 
-  const setPassword = async (phone: string, password: string) => {
+  const setPassword = async (phone: string, password: string, consent: LegalConsentInput) => {
     const res = await fetch(`${CONFIG.API_BASE}/api/users/set-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, password }),
+      body: JSON.stringify({ phone, password, consent }),
     });
     const result = await res.json();
     if (result.success) {

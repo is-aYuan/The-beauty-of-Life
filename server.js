@@ -78,6 +78,11 @@ const {
     saveUserPreferences,
     speechRateToTtsSpeed,
 } = require('./lib/userPreferences');
+const {
+    getClientIp,
+    recordUserConsent,
+    validateConsentInput,
+} = require('./lib/legalConsent');
 
 // ==================== CloudBase 初始化 ====================
 const cloudbase = require('@cloudbase/node-sdk');
@@ -490,7 +495,7 @@ async function updateUserProfile(userId, updates) {
 
 /**
  * 删除用户及其所有关联数据（级联删除）
- * 清理集合：conversations → summaries → memory_profiles → topic_profiles → biographies → sessions → user_preferences → users
+ * 清理集合：conversations → summaries → memory_profiles → topic_profiles → biographies → sessions → user_preferences → user_consents → users
  * 同时清理本地音频文件：data/records/{userId}
  */
 async function deleteUser(userId) {
@@ -515,6 +520,9 @@ async function deleteUser(userId) {
     const deletedPreferences = await deleteCollectionDocsByUserId(db, 'user_preferences', userId);
     console.log(`[删除] 已清理 ${deletedPreferences} 条用户偏好`);
 
+    const deletedConsents = await deleteCollectionDocsByUserId(db, 'user_consents', userId);
+    console.log(`[删除] 已清理 ${deletedConsents} 条用户同意记录`);
+
     const audioResult = deleteUserAudioFiles(AUDIO_ROOT, userId);
     console.log(`[删除] 本地音频目录${audioResult.deletedAudioDir ? '已清理' : '不存在'}: ${audioResult.audioDir}`);
 
@@ -529,6 +537,7 @@ async function deleteUser(userId) {
         deletedBiographies,
         deletedSessions,
         deletedPreferences,
+        deletedConsents,
         deletedAudioDir: audioResult.deletedAudioDir,
         deletedUser: true,
     };
@@ -1290,6 +1299,19 @@ function parseJsonBody(rawBody) {
     }
 }
 
+function buildConsentMetadataFromRequest(req, source) {
+    return {
+        source,
+        userAgent: req.headers['user-agent'] || '',
+        ip: getClientIp(req),
+    };
+}
+
+function sendConsentError(res, validation) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, message: validation.message, consentRequired: true }));
+}
+
 // ==================== 本地音频文件存储 ====================
 
 function ensureAudioDir(userId, sessionId) {
@@ -1331,9 +1353,21 @@ const server = http.createServer(async (req, res) => {
     // 用户注册
     if (url.pathname === '/api/register' && req.method === 'POST') {
         try {
-            const body = await getRequestBody(req);
-            const { phone, name, age, password } = JSON.parse(body);
+            const { phone, name, age, password, consent } = parseJsonBody(await getRequestBody(req));
+            const consentValidation = validateConsentInput(consent);
+            if (!consentValidation.valid) {
+                sendConsentError(res, consentValidation);
+                return;
+            }
+
             const result = await registerUser(phone, name, age, password);
+            if (result.success) {
+                await recordUserConsent(db, {
+                    userId: result.userId,
+                    phone: result.phone,
+                    ...buildConsentMetadataFromRequest(req, 'register'),
+                });
+            }
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result));
         } catch (err) {
@@ -1346,9 +1380,21 @@ const server = http.createServer(async (req, res) => {
     // 用户登录
     if (url.pathname === '/api/login' && req.method === 'POST') {
         try {
-            const body = await getRequestBody(req);
-            const { phone, password } = JSON.parse(body);
+            const { phone, password, consent } = parseJsonBody(await getRequestBody(req));
+            const consentValidation = validateConsentInput(consent);
+            if (!consentValidation.valid) {
+                sendConsentError(res, consentValidation);
+                return;
+            }
+
             const result = await loginUser(phone, password);
+            if (result.success) {
+                await recordUserConsent(db, {
+                    userId: result.userId,
+                    phone: result.phone,
+                    ...buildConsentMetadataFromRequest(req, 'login'),
+                });
+            }
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result));
         } catch (err) {
@@ -1361,9 +1407,21 @@ const server = http.createServer(async (req, res) => {
     // 老用户首次设置密码
     if (url.pathname === '/api/users/set-password' && req.method === 'POST') {
         try {
-            const body = await getRequestBody(req);
-            const { phone, password } = JSON.parse(body);
+            const { phone, password, consent } = parseJsonBody(await getRequestBody(req));
+            const consentValidation = validateConsentInput(consent);
+            if (!consentValidation.valid) {
+                sendConsentError(res, consentValidation);
+                return;
+            }
+
             const result = await setUserPassword(phone, password);
+            if (result.success) {
+                await recordUserConsent(db, {
+                    userId: result.userId,
+                    phone: result.phone,
+                    ...buildConsentMetadataFromRequest(req, 'set_password'),
+                });
+            }
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result));
         } catch (err) {

@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { BookLock } from "lucide-react";
+import { BookLock, X } from "lucide-react";
 import { useStoryEngine } from "../hooks/useStoryEngine";
 
 export const Route = createFileRoute("/login")({
@@ -15,6 +15,9 @@ function LoginPage() {
   const [age, setAge] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [acceptedLegalTerms, setAcceptedLegalTerms] = useState(false);
+  const [acceptedPersonalInfoProcessing, setAcceptedPersonalInfoProcessing] = useState(false);
+  const [legalDialogOpen, setLegalDialogOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
@@ -40,17 +43,26 @@ function LoginPage() {
       setErrorMsg("两次输入的密码不一致");
       return;
     }
+    if (!acceptedLegalTerms || !acceptedPersonalInfoProcessing) {
+      window.alert("请先勾选协议后继续\n\n为了保护您和家人的信息安全，使用前需要先阅读并同意相关协议。");
+      return;
+    }
+
+    const consent = {
+      acceptedLegalTerms,
+      acceptedPersonalInfoProcessing,
+    };
     
     setIsLoading(true);
     setErrorMsg("");
     
     let result;
     if (needsPasswordSetup) {
-      result = await setUserPassword(phone, password);
+      result = await setUserPassword(phone, password, consent);
     } else if (isLogin) {
-      result = await login(phone, password);
+      result = await login(phone, password, consent);
     } else {
-      result = await register(phone, name, age, password);
+      result = await register(phone, name, age, password, consent);
     }
     
     setIsLoading(false);
@@ -76,6 +88,9 @@ function LoginPage() {
     setConfirmPassword("");
     setErrorMsg("");
   };
+
+  const checkboxCls = "mt-1 h-5 w-5 shrink-0 rounded border-amber-200 accent-amber-500";
+  const agreementTextCls = "text-sm leading-relaxed text-amber-100/85";
 
   const submitLabel = needsPasswordSetup
     ? "设置密码并进入"
@@ -172,6 +187,41 @@ function LoginPage() {
             />
           )}
 
+          <div className="mb-5 space-y-3 rounded-xl bg-stone-900/35 p-4 ring-1 ring-amber-100/10">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={acceptedLegalTerms}
+                onChange={(e) => setAcceptedLegalTerms(e.target.checked)}
+                className={checkboxCls}
+                disabled={isLoading}
+              />
+              <span className={agreementTextCls}>
+                我已阅读并同意
+                <button
+                  type="button"
+                  onClick={() => setLegalDialogOpen(true)}
+                  className="mx-1 font-semibold text-amber-300 underline underline-offset-4"
+                >
+                  《用户服务协议》《隐私政策》《AI 生成内容说明与免责声明》
+                </button>
+              </span>
+            </label>
+
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={acceptedPersonalInfoProcessing}
+                onChange={(e) => setAcceptedPersonalInfoProcessing(e.target.checked)}
+                className={checkboxCls}
+                disabled={isLoading}
+              />
+              <span className={agreementTextCls}>
+                我同意平台为生成回忆录而处理我的语音、文字、家庭故事等个人信息。
+              </span>
+            </label>
+          </div>
+
           <button
             type="submit"
             disabled={isLoading}
@@ -190,6 +240,57 @@ function LoginPage() {
           </p>
         )}
       </div>
+
+      {legalDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/70 p-5">
+          <div className="max-h-[86vh] w-full max-w-2xl overflow-hidden rounded-2xl bg-amber-50 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-amber-200 p-5">
+              <div>
+                <h2 className="text-2xl font-black text-stone-900">使用前说明</h2>
+                <p className="mt-1 text-base text-stone-600">请阅读以下内容后再勾选同意。</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLegalDialogOpen(false)}
+                className="rounded-full bg-white p-2 text-stone-500 shadow-sm hover:bg-amber-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="max-h-[62vh] space-y-4 overflow-y-auto p-5 text-base leading-relaxed text-stone-700">
+              <p>
+                本产品用于辅助用户记录、整理和生成个人回忆录内容，提供语音识别、AI 问答、文字整理和回忆录生成等功能，不构成法律、医疗、心理咨询、财务或其他专业建议。
+              </p>
+              <p>
+                AI 生成内容可能存在理解偏差、表述不准确、遗漏或不符合真实意图的情况。用户应自行核对、修改并确认最终内容。
+              </p>
+              <p>
+                用户讲述家庭成员、亲友或其他第三方故事时，可能涉及他人个人信息或隐私。请在合理范围内取得相关人员同意，或避免提供可能损害他人权益的敏感内容。
+              </p>
+              <p>
+                为实现产品功能，平台可能处理手机号、姓名、年龄、语音内容、转写文本、对话记录、回忆录内容、使用记录和个性化设置。
+              </p>
+              <p>
+                回忆过往经历可能引发情绪波动。本产品仅提供陪伴式记录和整理服务，如用户明显不适，应暂停使用并寻求家人、照护者或专业人士帮助。
+              </p>
+              <p>
+                用户可以申请查看、更正或删除其个人信息和内容。因法律法规、系统安全或审计需要，部分备份或日志可能在合理期限内保留。
+              </p>
+            </div>
+
+            <div className="border-t border-amber-200 p-5">
+              <button
+                type="button"
+                onClick={() => setLegalDialogOpen(false)}
+                className="w-full rounded-xl bg-stone-800 py-3 text-xl font-bold text-amber-50 shadow-md"
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
