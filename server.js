@@ -71,6 +71,13 @@ const {
 const {
     getBiographyStyle,
 } = require('./lib/biographyStyles');
+const {
+    DEFAULT_USER_PREFERENCES,
+    getUserPreferences,
+    normalizeUserPreferences,
+    saveUserPreferences,
+    speechRateToTtsSpeed,
+} = require('./lib/userPreferences');
 
 // ==================== CloudBase 初始化 ====================
 const cloudbase = require('@cloudbase/node-sdk');
@@ -483,7 +490,7 @@ async function updateUserProfile(userId, updates) {
 
 /**
  * 删除用户及其所有关联数据（级联删除）
- * 清理集合：conversations → summaries → memory_profiles → topic_profiles → biographies → sessions → users
+ * 清理集合：conversations → summaries → memory_profiles → topic_profiles → biographies → sessions → user_preferences → users
  * 同时清理本地音频文件：data/records/{userId}
  */
 async function deleteUser(userId) {
@@ -505,6 +512,9 @@ async function deleteUser(userId) {
     const deletedSessions = await deleteCollectionDocsByUserId(db, 'sessions', userId);
     console.log(`[删除] 已清理 ${deletedSessions} 条会话记录`);
 
+    const deletedPreferences = await deleteCollectionDocsByUserId(db, 'user_preferences', userId);
+    console.log(`[删除] 已清理 ${deletedPreferences} 条用户偏好`);
+
     const audioResult = deleteUserAudioFiles(AUDIO_ROOT, userId);
     console.log(`[删除] 本地音频目录${audioResult.deletedAudioDir ? '已清理' : '不存在'}: ${audioResult.audioDir}`);
 
@@ -518,6 +528,7 @@ async function deleteUser(userId) {
         deletedTopicProfiles,
         deletedBiographies,
         deletedSessions,
+        deletedPreferences,
         deletedAudioDir: audioResult.deletedAudioDir,
         deletedUser: true,
     };
@@ -1376,6 +1387,34 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 用户个性化设置：朗读语速、字体大小
+    if (url.pathname.match(/^\/api\/user-preferences\/[^/]+$/) && req.method === 'GET') {
+        const userId = url.pathname.split('/').pop();
+        try {
+            const preferences = await getUserPreferences(db, userId);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, preferences }));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+        return;
+    }
+
+    if (url.pathname.match(/^\/api\/user-preferences\/[^/]+$/) && req.method === 'POST') {
+        const userId = url.pathname.split('/').pop();
+        try {
+            const body = parseJsonBody(await getRequestBody(req));
+            const preferences = await saveUserPreferences(db, userId, body.preferences || body);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, preferences }));
+        } catch (err) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+        return;
+    }
+
     // 删除用户及所有关联数据
     if (url.pathname.startsWith('/api/user/') && req.method === 'DELETE') {
         const userId = url.pathname.split('/').pop();
@@ -1905,7 +1944,7 @@ async function buildEntryGuidanceForUser(userId, userName, topicProfile) {
 async function speakEntryGuidance(sessionId, session, entryGuidance) {
     if (!entryGuidance?.shouldAutoSpeak || !entryGuidance.speechText) return;
 
-    const audioData = await synthesizeSpeech(entryGuidance.speechText);
+    const audioData = await synthesizeSpeech(entryGuidance.speechText, session.userPreferences);
     if (audioData && session.ws.readyState === 1) {
         session.ws.send(audioData);
         console.log(`[${sessionId}] 入口引导 TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
@@ -1928,6 +1967,7 @@ wss.on('connection', async (ws) => {
         audioChunks: [],
         conversationHistory: [],
         pendingRecommendationQuestion: null,
+        userPreferences: { ...DEFAULT_USER_PREFERENCES },
         isProcessing: false,
     });
 
@@ -2005,6 +2045,7 @@ async function handleMessage(sessionId, session, msg) {
             result.name = userProfile.name;
             result.age = userProfile.age;
             session.userId = result.userId;
+            session.userPreferences = await getUserPreferences(db, result.userId);
             await createSession(sessionId, result.userId);
 
             let topicProfile = await getOrCreateTopicProfile(result.userId);
@@ -2020,6 +2061,7 @@ async function handleMessage(sessionId, session, msg) {
                 hasBiography,
                 topicProfile,
                 entryGuidance: entry.entryGuidance,
+                preferences: session.userPreferences,
             });
             speakEntryGuidance(sessionId, session, entry.entryGuidance).catch((err) => {
                 console.error(`[${sessionId}] 入口引导朗读失败:`, err.message || err);
@@ -2041,7 +2083,9 @@ async function handleMessage(sessionId, session, msg) {
 
         if (result.success) {
             session.userId = result.userId;
+            session.userPreferences = normalizeUserPreferences(msg.userPreferences);
             await createSession(sessionId, result.userId);
+            session.userPreferences = await saveUserPreferences(db, result.userId, session.userPreferences);
 
             let topicProfile = await getOrCreateTopicProfile(result.userId);
             const entry = await buildEntryGuidanceForUser(result.userId, name, topicProfile);
@@ -2054,6 +2098,7 @@ async function handleMessage(sessionId, session, msg) {
                 hasBiography: false,
                 topicProfile,
                 entryGuidance: entry.entryGuidance,
+                preferences: session.userPreferences,
             });
             speakEntryGuidance(sessionId, session, entry.entryGuidance).catch((err) => {
                 console.error(`[${sessionId}] 入口引导朗读失败:`, err.message || err);
@@ -2087,6 +2132,30 @@ async function handleMessage(sessionId, session, msg) {
                 event: 'topic_profile_error',
                 status: 'ready',
                 text: err.message,
+            });
+        }
+        return;
+    }
+
+    // 处理个性化设置更新。前端已本地即时生效，这里负责同步云端与当前 TTS 会话。
+    if (msg.type === 'update_preferences') {
+        if (!session.userId) {
+            sendJson(session.ws, { status: 'need_login', text: '请先登录' });
+            return;
+        }
+
+        try {
+            session.userPreferences = await saveUserPreferences(db, session.userId, msg.preferences);
+            sendJson(session.ws, {
+                event: 'preferences_updated',
+                status: 'ready',
+                preferences: session.userPreferences,
+            });
+        } catch (err) {
+            sendJson(session.ws, {
+                event: 'preferences_error',
+                status: 'ready',
+                text: err.message || '设置保存失败，请稍后再试。',
             });
         }
         return;
@@ -2199,7 +2268,7 @@ async function processVoiceInteraction(sessionId, session, audioBuffer) {
     console.log(`[${sessionId}] Step 3: 语音合成中...`);
     sendJson(session.ws, { status: 'ai_speaking', text: aiReply });
 
-    const audioData = await synthesizeSpeech(aiReply);
+    const audioData = await synthesizeSpeech(aiReply, session.userPreferences);
     if (audioData) {
         session.ws.send(audioData);
         console.log(`[${sessionId}] TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
@@ -2256,7 +2325,7 @@ async function startRecommendationQuestion(sessionId, session, msg) {
         recommendation: session.pendingRecommendationQuestion,
     });
 
-    const audioData = await synthesizeSpeech(record.aiReply);
+    const audioData = await synthesizeSpeech(record.aiReply, session.userPreferences);
     if (audioData) {
         session.ws.send(audioData);
         console.log(`[${sessionId}] 推荐问题 TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
@@ -2389,7 +2458,7 @@ async function analyzeTopicProgressFromTurn(sessionId, session, userText, aiRepl
     }
 }
 
-async function synthesizeSpeech(text) {
+async function synthesizeSpeech(text, userPreferences = DEFAULT_USER_PREFERENCES) {
     try {
         const params = {
             Text: text,
@@ -2397,7 +2466,7 @@ async function synthesizeSpeech(text) {
             VoiceType: 1002,
             Codec: 'mp3',
             SampleRate: 16000,
-            Speed: 0.85,
+            Speed: speechRateToTtsSpeed(userPreferences),
             Volume: 8,
         };
         const result = await ttsClient.TextToVoice(params);

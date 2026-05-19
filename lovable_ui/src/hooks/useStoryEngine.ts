@@ -7,6 +7,13 @@ import {
 } from "../lib/biographyTopics";
 import { isAudioPlaybackAllowed } from "../lib/audioSessionGuard";
 import type { ArchiveRecommendation, BiographyBook, MyArchiveView } from "../lib/archiveTypes";
+import {
+  buildFontScaleCssValue,
+  loadLocalUserPreferences,
+  normalizeUserPreferences,
+  saveLocalUserPreferences,
+  type UserPreferences,
+} from "../lib/userPreferences.js";
 
 const CONFIG = {
   API_BASE: "http://localhost:8000",
@@ -48,11 +55,15 @@ export function useStoryEngine() {
   const [serverEntryGuidance, setServerEntryGuidance] = useState<ServerEntryGuidance | null>(null);
   const [archive, setArchive] = useState<MyArchiveView | null>(null);
   const [biographies, setBiographies] = useState<BiographyBook[]>([]);
+  const [userPreferences, setUserPreferences] = useState<UserPreferences>(() =>
+    loadLocalUserPreferences(),
+  );
 
   // References for mutable state that doesn't need to trigger renders
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const userPreferencesRef = useRef<UserPreferences>(userPreferences);
   
   // Audio Refs
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -76,6 +87,11 @@ export function useStoryEngine() {
 
   // Expose frequency data for UI visualizer
   const [frequencyData, setFrequencyData] = useState<Uint8Array | null>(null);
+
+  useEffect(() => {
+    userPreferencesRef.current = userPreferences;
+    document.documentElement.style.fontSize = buildFontScaleCssValue(userPreferences);
+  }, [userPreferences]);
 
   // User auth management
   useEffect(() => {
@@ -219,9 +235,63 @@ export function useStoryEngine() {
     }
   };
 
+  // 模块：用户偏好同步。前端先本地即时生效，再与云端保持一致。
+  const fetchUserPreferences = async () => {
+    if (!user) return userPreferencesRef.current;
+    try {
+      const res = await fetch(`${CONFIG.API_BASE}/api/user-preferences/${user.userId}`);
+      const data = await res.json();
+      if (data.success && data.preferences) {
+        const preferences = saveLocalUserPreferences(localStorage, data.preferences);
+        setUserPreferences(preferences);
+        return preferences;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return userPreferencesRef.current;
+  };
+
+  const updateUserPreferences = async (updates: Partial<UserPreferences>) => {
+    const next = saveLocalUserPreferences(localStorage, {
+      ...userPreferencesRef.current,
+      ...updates,
+    });
+    userPreferencesRef.current = next;
+    setUserPreferences(next);
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: "update_preferences",
+        preferences: next,
+      }));
+    }
+
+    if (!user) return next;
+
+    try {
+      const res = await fetch(`${CONFIG.API_BASE}/api/user-preferences/${user.userId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferences: next }),
+      });
+      const data = await res.json();
+      if (data.success && data.preferences) {
+        const saved = saveLocalUserPreferences(localStorage, data.preferences);
+        userPreferencesRef.current = saved;
+        setUserPreferences(saved);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    return userPreferencesRef.current;
+  };
+
   useEffect(() => {
     if (user) {
       setTopicProfile((prev) => prev ?? createFallbackTopicProfile(user.userId));
+      fetchUserPreferences();
       fetchStats();
       fetchTopicProfile();
       fetchBiographies();
@@ -276,6 +346,7 @@ export function useStoryEngine() {
           type: "login",
           phone: user.phone,
           authToken: user.authToken,
+          userPreferences: userPreferencesRef.current,
         }));
       }
     };
@@ -330,6 +401,10 @@ export function useStoryEngine() {
         setSubtitle(msg.text || "");
         if (msg.hasBiography !== undefined) setHasBiography(msg.hasBiography);
         if (msg.entryGuidance) setServerEntryGuidance(msg.entryGuidance);
+        if (msg.preferences) {
+          const preferences = saveLocalUserPreferences(localStorage, msg.preferences);
+          setUserPreferences(preferences);
+        }
         if (msg.topicProfile) {
           setTopicProfile(msg.topicProfile);
         } else {
@@ -339,6 +414,10 @@ export function useStoryEngine() {
       }
       if (msg.event === "topic_profile_updated" && msg.topicProfile) {
         setTopicProfile(msg.topicProfile);
+      }
+      if (msg.event === "preferences_updated" && msg.preferences) {
+        const preferences = saveLocalUserPreferences(localStorage, msg.preferences);
+        setUserPreferences(preferences);
       }
       if (msg.status === "ai_thinking") setConvoState("aiThinking");
       if (msg.status === "ai_speaking") setConvoState("aiTalking");
@@ -686,6 +765,7 @@ export function useStoryEngine() {
     serverEntryGuidance,
     archive,
     biographies,
+    userPreferences,
     userStats,
     chatHistory,
     frequencyData,
@@ -703,6 +783,7 @@ export function useStoryEngine() {
     fetchBiographies,
     generateBiography,
     activateArchiveRecommendation,
+    updateUserPreferences,
     unlockAudioContext
   };
 }

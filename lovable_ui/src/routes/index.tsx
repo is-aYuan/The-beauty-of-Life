@@ -11,6 +11,8 @@ import {
   User,
   BookOpen,
   X,
+  Volume2,
+  Type,
 } from "lucide-react";
 import { useChatAutoScroll } from "../lib/chatAutoScroll";
 import {
@@ -25,6 +27,16 @@ import {
 } from "../lib/biographyStyles.js";
 import { buildMemoirTitle } from "../lib/memoirTitle.js";
 import { useStoryEngine } from "../hooks/useStoryEngine";
+import {
+  FONT_SCALE_PRESETS,
+  FONT_SCALE_RANGE,
+  SPEECH_RATE_PRESETS,
+  SPEECH_RATE_RANGE,
+  speechRateToPreviewRate,
+  type FontSizePreset,
+  type SpeechRatePreset,
+  type UserPreferences,
+} from "../lib/userPreferences.js";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -46,6 +58,18 @@ const TAB_TITLES: Record<Tab, string> = {
   family: "亲情连接",
   settings: "设置",
 };
+
+const SPEECH_RATE_OPTIONS: { id: Exclude<SpeechRatePreset, "custom">; label: string }[] = [
+  { id: "slow", label: "慢一点" },
+  { id: "normal", label: "标准" },
+  { id: "fast", label: "快一点" },
+];
+
+const FONT_SIZE_OPTIONS: { id: Exclude<FontSizePreset, "custom">; label: string }[] = [
+  { id: "normal", label: "标准" },
+  { id: "large", label: "大" },
+  { id: "extraLarge", label: "特大" },
+];
 
 function MiniVisualizer({ freqData }: { freqData: Uint8Array | null }) {
   const bars = Array.from({ length: 48 }, (_, i) => {
@@ -87,6 +111,174 @@ function formatArchiveDate(value: unknown) {
   return "";
 }
 
+function SettingsSegment<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { id: T; label: string }[];
+  value: string;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      {options.map((option) => {
+        const active = value === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => onChange(option.id)}
+            className={`rounded-2xl px-4 py-4 text-xl font-bold transition-transform hover:scale-[1.02] active:scale-[0.98] ${
+              active
+                ? "bg-stone-800 text-amber-50 shadow-md"
+                : "bg-amber-100 text-stone-700 hover:bg-amber-200"
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SettingsPanel({
+  preferences,
+  onChange,
+}: {
+  preferences: UserPreferences;
+  onChange: (updates: Partial<UserPreferences>) => void;
+}) {
+  const [previewSpeaking, setPreviewSpeaking] = useState(false);
+  const previewText = "这是预览文字：我会陪您慢慢讲，把故事整理成回忆录。";
+  const speechRateLabel = preferences.speechRate <= -1.75
+    ? "最慢"
+    : preferences.speechRate < -0.25
+      ? "偏慢"
+      : preferences.speechRate < 1.25
+        ? "标准"
+        : "偏快";
+
+  const speakPreview = () => {
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(previewText);
+    utterance.lang = "zh-CN";
+    utterance.rate = speechRateToPreviewRate(preferences);
+    utterance.onend = () => setPreviewSpeaking(false);
+    utterance.onerror = () => setPreviewSpeaking(false);
+    setPreviewSpeaking(true);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <header className="border-b-2 border-amber-200 pb-5">
+        <h2 className="text-4xl font-bold text-stone-800">设置</h2>
+        <p className="mt-2 text-xl text-stone-600">调整朗读和文字显示</p>
+      </header>
+
+      <div className="space-y-6 py-6">
+        <section className="rounded-2xl bg-white/85 p-6 shadow-sm ring-1 ring-amber-100">
+          <div className="mb-4 flex items-center gap-3">
+            <Volume2 className="h-8 w-8 text-amber-700" />
+            <h3 className="text-2xl font-bold text-stone-800">朗读语速</h3>
+          </div>
+          <SettingsSegment
+            options={SPEECH_RATE_OPTIONS}
+            value={preferences.speechRatePreset}
+            onChange={(preset) =>
+              onChange({
+                speechRatePreset: preset,
+                speechRate: SPEECH_RATE_PRESETS[preset],
+              })
+            }
+          />
+          <div className="mt-6">
+            <div className="mb-2 flex justify-between text-lg font-semibold text-stone-600">
+              <span>更慢</span>
+              <span>{speechRateLabel}</span>
+              <span>更快</span>
+            </div>
+            <input
+              type="range"
+              min={SPEECH_RATE_RANGE.min}
+              max={SPEECH_RATE_RANGE.max}
+              step={SPEECH_RATE_RANGE.step}
+              value={preferences.speechRate}
+              onChange={(event) =>
+                onChange({
+                  speechRatePreset: "custom",
+                  speechRate: Number(event.target.value),
+                })
+              }
+              className="h-3 w-full accent-amber-700"
+              aria-label="朗读语速微调"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={speakPreview}
+            className="mt-5 flex items-center gap-2 rounded-xl bg-stone-800 px-5 py-3 text-lg font-bold text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
+          >
+            <Volume2 className="h-5 w-5" />
+            {previewSpeaking ? "正在试听" : "试听朗读"}
+          </button>
+        </section>
+
+        <section className="rounded-2xl bg-white/85 p-6 shadow-sm ring-1 ring-amber-100">
+          <div className="mb-4 flex items-center gap-3">
+            <Type className="h-8 w-8 text-amber-700" />
+            <h3 className="text-2xl font-bold text-stone-800">字体大小</h3>
+          </div>
+          <SettingsSegment
+            options={FONT_SIZE_OPTIONS}
+            value={preferences.fontSizePreset}
+            onChange={(preset) =>
+              onChange({
+                fontSizePreset: preset,
+                fontScale: FONT_SCALE_PRESETS[preset],
+              })
+            }
+          />
+          <div className="mt-6">
+            <div className="mb-2 flex justify-between text-lg font-semibold text-stone-600">
+              <span>标准</span>
+              <span>{Math.round(preferences.fontScale * 100)}%</span>
+              <span>更大</span>
+            </div>
+            <input
+              type="range"
+              min={FONT_SCALE_RANGE.min}
+              max={FONT_SCALE_RANGE.max}
+              step={FONT_SCALE_RANGE.step}
+              value={preferences.fontScale}
+              onChange={(event) =>
+                onChange({
+                  fontSizePreset: "custom",
+                  fontScale: Number(event.target.value),
+                })
+              }
+              className="h-3 w-full accent-amber-700"
+              aria-label="字体大小微调"
+            />
+          </div>
+        </section>
+
+        <section className="rounded-2xl bg-blue-50/70 p-6 ring-1 ring-blue-100">
+          <p
+            className="leading-relaxed text-blue-900"
+            style={{ fontSize: `${Math.round(24 * preferences.fontScale)}px` }}
+          >
+            {previewText}
+          </p>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function Index() {
   const navigate = useNavigate();
   const {
@@ -99,6 +291,7 @@ function Index() {
     serverEntryGuidance,
     archive,
     biographies,
+    userPreferences,
     userStats,
     chatHistory,
     frequencyData,
@@ -113,6 +306,7 @@ function Index() {
     fetchBiographies,
     generateBiography,
     activateArchiveRecommendation,
+    updateUserPreferences,
   } = useStoryEngine();
 
   const [activeTab, setActiveTab] = useState<Tab>("story");
@@ -340,6 +534,11 @@ function Index() {
               )}
             </div>
           </div>
+        ) : activeTab === "settings" ? (
+          <SettingsPanel
+            preferences={userPreferences}
+            onChange={updateUserPreferences}
+          />
         ) : activeTab !== "story" ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center">
             <h2 className="text-4xl font-bold text-stone-800">
