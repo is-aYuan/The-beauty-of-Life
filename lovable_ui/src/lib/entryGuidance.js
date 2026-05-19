@@ -9,28 +9,57 @@ function isFirstTimeUser(input) {
 }
 
 function buildOnboardingPrompt(input) {
-  const userName = normalizeText(input.userName) || '您好';
   const topicTitle = normalizeText(input.currentTopicTitle) || DEFAULT_TOPIC_TITLE;
 
-  return `您好，${userName}！我们可以先从右边选一个主题开始，比如“${topicTitle}”。您只要按住下方话筒，像聊天一样讲，我会帮您整理成回忆录。`;
+  return `我们先从“${topicTitle}”开始吧。按住下面的话筒，像聊天一样讲。`;
 }
 
-// 模块：入口引导状态机。集中处理新用户和老用户的开场文案，避免各 UI 区域各自判断。
+function normalizeServerEntryGuidance(value) {
+  if (!value || typeof value !== 'object') return null;
+
+  const displayText = normalizeText(value.displayText);
+  if (!displayText) return null;
+
+  const mode = value.mode === 'returning_user' ? 'returning_user' : 'new_user';
+
+  return {
+    mode,
+    topicId: normalizeText(value.topicId),
+    storyPrompt: displayText,
+    speechText: normalizeText(value.speechText),
+    nextQuestion: normalizeText(value.nextQuestion),
+    shouldAutoSpeak: value.shouldAutoSpeak !== false,
+  };
+}
+
+// 模块：入口引导状态机。统一处理新用户开场、老用户续聊和离线兜底，避免各 UI 区域各自判断。
 export function buildEntryGuidance(input) {
-  const firstTimeUser = isFirstTimeUser(input);
-  const storyPrompt = firstTimeUser ? buildOnboardingPrompt(input) : normalizeText(input.subtitle);
+  const serverGuidance = normalizeServerEntryGuidance(input.serverEntryGuidance);
+  const firstTimeUser = serverGuidance
+    ? serverGuidance.mode === 'new_user'
+    : isFirstTimeUser(input);
+  const storyPrompt = serverGuidance?.storyPrompt ||
+    (firstTimeUser ? buildOnboardingPrompt(input) : normalizeText(input.subtitle));
 
   if (input.networkStatus === 'offline' || !input.wsConnected) {
     return {
       firstTimeUser,
       storyPrompt,
       idleStatus: '正在连接...',
+      speechText: serverGuidance?.speechText || '',
+      shouldAutoSpeak: Boolean(serverGuidance?.shouldAutoSpeak),
+      topicId: serverGuidance?.topicId || '',
+      nextQuestion: serverGuidance?.nextQuestion || '',
     };
   }
 
   return {
     firstTimeUser,
     storyPrompt,
-    idleStatus: firstTimeUser ? '选一个主题，按住话筒开始讲第一段回忆' : '请点击开始讲述',
+    idleStatus: firstTimeUser ? '按住红色按钮，说一段回忆' : '按住话筒，接着上次的话题继续讲',
+    speechText: serverGuidance?.speechText || '',
+    shouldAutoSpeak: Boolean(serverGuidance?.shouldAutoSpeak),
+    topicId: serverGuidance?.topicId || '',
+    nextQuestion: serverGuidance?.nextQuestion || '',
   };
 }

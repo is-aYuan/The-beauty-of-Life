@@ -19,10 +19,11 @@ function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   
-  const { login, register, setPassword: setUserPassword } = useStoryEngine();
+  const { login, register, setPassword: setUserPassword, unlockAudioContext } = useStoryEngine();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    unlockAudioContext();
     if (!phone || phone.length !== 11) {
       setErrorMsg("请输入11位手机号");
       return;

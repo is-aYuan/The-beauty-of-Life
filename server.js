@@ -56,6 +56,12 @@ const {
     buildWelcomeText,
 } = require('./lib/welcomeText');
 const {
+    buildSessionEntryGuidance,
+} = require('./lib/sessionEntryGuidance');
+const {
+    normalizeQuestionForElder,
+} = require('./lib/questionSafety');
+const {
     buildBiographyGenerationDecision,
     getLatestBiography,
 } = require('./lib/biographyGeneration');
@@ -1866,6 +1872,46 @@ async function getWelcomeText(userId, userName) {
     }
 }
 
+async function buildEntryGuidanceForUser(userId, userName, topicProfile) {
+    const [conversations, summaries] = await Promise.all([
+        getUserConversations(userId),
+        getUserSummaries(userId),
+    ]);
+
+    const entryGuidance = buildSessionEntryGuidance({
+        userName,
+        topicProfile,
+        conversations,
+        summaries,
+        totalConversations: conversations.length,
+    });
+
+    let currentTopicProfile = topicProfile;
+    const shouldSyncTopic = entryGuidance.topicId &&
+        entryGuidance.topicId !== topicProfile.currentTopicId &&
+        BIOGRAPHY_TOPICS.some((topic) => topic.id === entryGuidance.topicId);
+
+    if (shouldSyncTopic) {
+        currentTopicProfile = await updateCurrentTopic(userId, entryGuidance.topicId);
+    }
+
+    return {
+        entryGuidance,
+        topicProfile: currentTopicProfile,
+    };
+}
+
+// 模块：入口引导语音播放。欢迎/续聊朗读只发送音频，不写 conversation，避免污染回忆录素材。
+async function speakEntryGuidance(sessionId, session, entryGuidance) {
+    if (!entryGuidance?.shouldAutoSpeak || !entryGuidance.speechText) return;
+
+    const audioData = await synthesizeSpeech(entryGuidance.speechText);
+    if (audioData && session.ws.readyState === 1) {
+        session.ws.send(audioData);
+        console.log(`[${sessionId}] 入口引导 TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
+    }
+}
+
 // ==================== WebSocket 服务器 ====================
 const wss = new WebSocketServer({ server, path: '/ws/chat' });
 const sessions = new Map();
@@ -1961,17 +2007,22 @@ async function handleMessage(sessionId, session, msg) {
             session.userId = result.userId;
             await createSession(sessionId, result.userId);
 
-            const topicProfile = await getOrCreateTopicProfile(result.userId);
+            let topicProfile = await getOrCreateTopicProfile(result.userId);
+            const entry = await buildEntryGuidanceForUser(result.userId, result.name, topicProfile);
+            topicProfile = entry.topicProfile;
             session.currentTopicId = topicProfile.currentTopicId;
-            const welcomeText = await getWelcomeText(result.userId, result.name);
             const hasBiography = await checkHasBiography(result.userId);
 
             sendJson(session.ws, {
                 status: 'ready',
-                text: welcomeText,
+                text: entry.entryGuidance.displayText,
                 user: result,
                 hasBiography,
                 topicProfile,
+                entryGuidance: entry.entryGuidance,
+            });
+            speakEntryGuidance(sessionId, session, entry.entryGuidance).catch((err) => {
+                console.error(`[${sessionId}] 入口引导朗读失败:`, err.message || err);
             });
         } else {
             sendJson(session.ws, {
@@ -1992,14 +2043,20 @@ async function handleMessage(sessionId, session, msg) {
             session.userId = result.userId;
             await createSession(sessionId, result.userId);
 
-            const topicProfile = await getOrCreateTopicProfile(result.userId);
+            let topicProfile = await getOrCreateTopicProfile(result.userId);
+            const entry = await buildEntryGuidanceForUser(result.userId, name, topicProfile);
+            topicProfile = entry.topicProfile;
             session.currentTopicId = topicProfile.currentTopicId;
             sendJson(session.ws, {
                 status: 'ready',
-                text: `注册成功！您好，${name}！我是故事坊的AI助手，我来帮您把人生故事记录下来。您随便聊，想到什么说什么，我会帮您整理成一本故事书。`,
+                text: entry.entryGuidance.displayText,
                 user: result,
                 hasBiography: false,
                 topicProfile,
+                entryGuidance: entry.entryGuidance,
+            });
+            speakEntryGuidance(sessionId, session, entry.entryGuidance).catch((err) => {
+                console.error(`[${sessionId}] 入口引导朗读失败:`, err.message || err);
             });
         } else {
             sendJson(session.ws, {
@@ -2164,6 +2221,13 @@ async function startRecommendationQuestion(sessionId, session, msg) {
         recommendation,
         selectedTopic,
     });
+    const safeQuestion = normalizeQuestionForElder({
+        question: record.aiReply,
+        currentTopicId: record.topicId,
+        topicTitle: record.topicTitle,
+        source: 'archive_recommendation',
+    });
+    record.aiReply = safeQuestion.question;
 
     await saveConversation(sessionId, userId, record);
 
@@ -2252,7 +2316,15 @@ async function chatWithAI(sessionId, session, userText) {
         };
 
         const result = await hunyuanClient.ChatCompletions(params);
-        const aiReply = result.Choices?.[0]?.Message?.Content || '抱歉，我没有理解，请再说一次。';
+        let aiReply = result.Choices?.[0]?.Message?.Content || '抱歉，我没有理解，请再说一次。';
+        const selectedTopic = topicProfile ? getSelectedTopic(topicProfile, session.currentTopicId) : null;
+        const safeReply = normalizeQuestionForElder({
+            question: aiReply,
+            currentTopicId: selectedTopic?.id || session.currentTopicId,
+            topicTitle: selectedTopic?.title || '',
+            source: 'hunyuan_reply',
+        });
+        aiReply = safeReply.question;
 
         session.conversationHistory.push({ Role: 'assistant', Content: aiReply });
         if (session.pendingRecommendationQuestion) {

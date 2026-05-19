@@ -55,3 +55,19 @@ test('merges topic analysis arrays and person profile updates', () => {
     assert.deepEqual(topic.missingInfo, ['母亲性格', '家里规矩']);
     assert.deepEqual(updated.personProfile, { hometown: '河南', ethnicity: '汉族' });
 });
+
+test('normalizes unsafe suggested next questions before saving topic profile', () => {
+    const profile = createDefaultTopicProfile('user_1');
+
+    const updated = applyTopicAnalysisToProfile(profile, {
+        topicId: 'childhood',
+        progress: 10,
+        suggestedNextQuestion: '您小时候是男孩还是女孩呀？这能让我更好了解您的童年呢。',
+    }, '2026-05-16T00:00:00.000Z');
+
+    const topic = updated.topics.find((item) => item.id === 'childhood');
+    assert.equal(
+        topic.suggestedNextQuestion,
+        '您小时候最常跟谁一起玩？是在家附近，还是学校附近？',
+    );
+});

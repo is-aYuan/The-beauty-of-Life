@@ -96,6 +96,7 @@ function Index() {
     convoState,
     subtitle,
     topicProfile,
+    serverEntryGuidance,
     archive,
     biographies,
     userStats,
@@ -165,7 +166,11 @@ function Index() {
     wsConnected,
     networkStatus,
     subtitle,
+    serverEntryGuidance,
   });
+  const shouldShowEntryPrompt = Boolean(entryGuidance.storyPrompt) &&
+    convoState !== "userRecording" &&
+    (convoState !== "aiTalking" || chatHistory.length === 0);
 
   const getTopicStatusLabel = (status: string, progress: number) => {
     if (status === "rich" || progress >= 85) return "素材已丰富";
@@ -390,7 +395,7 @@ function Index() {
               )}
 
               {/* Subtitle from stream */}
-              {entryGuidance.storyPrompt && convoState !== "userRecording" && convoState !== "aiTalking" && (
+              {shouldShowEntryPrompt && (
                 <div className="flex items-start gap-4 pt-4 border-t border-amber-200/50">
                    <div className="max-w-[100%] bg-blue-50/50 p-4 rounded-xl border border-blue-100/50">
                      <p className="text-2xl leading-relaxed text-blue-800">{entryGuidance.storyPrompt}</p>

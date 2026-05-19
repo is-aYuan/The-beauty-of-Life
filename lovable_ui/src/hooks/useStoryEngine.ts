@@ -24,6 +24,15 @@ let audioUnlocked = false;
 export type User = { userId: string; phone: string; name: string; age?: number; authToken?: string };
 export type ConvoState = "idle" | "userRecording" | "aiThinking" | "aiTalking";
 export type ChatMessage = { id: number; role: "ai" | "user"; text: string };
+export type ServerEntryGuidance = {
+  mode: "new_user" | "returning_user";
+  topicId: string;
+  topicTitle: string;
+  displayText: string;
+  speechText: string;
+  nextQuestion: string;
+  shouldAutoSpeak: boolean;
+};
 export type { BiographyTopic, TopicProfile, TopicStatus };
 
 export function useStoryEngine() {
@@ -36,6 +45,7 @@ export function useStoryEngine() {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [hasBiography, setHasBiography] = useState(false);
   const [topicProfile, setTopicProfile] = useState<TopicProfile | null>(null);
+  const [serverEntryGuidance, setServerEntryGuidance] = useState<ServerEntryGuidance | null>(null);
   const [archive, setArchive] = useState<MyArchiveView | null>(null);
   const [biographies, setBiographies] = useState<BiographyBook[]>([]);
 
@@ -148,6 +158,7 @@ export function useStoryEngine() {
     stopPlayback();
     setConvoState("idle");
     setSubtitle("");
+    setServerEntryGuidance(null);
     setFrequencyData(null);
     setArchive(null);
     setBiographies([]);
@@ -318,6 +329,7 @@ export function useStoryEngine() {
         setConvoState("idle");
         setSubtitle(msg.text || "");
         if (msg.hasBiography !== undefined) setHasBiography(msg.hasBiography);
+        if (msg.entryGuidance) setServerEntryGuidance(msg.entryGuidance);
         if (msg.topicProfile) {
           setTopicProfile(msg.topicProfile);
         } else {
@@ -375,7 +387,7 @@ export function useStoryEngine() {
 
     if (playbackQueueRef.current.length === 0) {
       isPlayingRef.current = false;
-      if (convoState === "aiTalking") setConvoState("idle");
+      setConvoState((prev) => (prev === "aiTalking" ? "idle" : prev));
       return;
     }
     isPlayingRef.current = true;
@@ -671,6 +683,7 @@ export function useStoryEngine() {
     subtitle,
     hasBiography,
     topicProfile,
+    serverEntryGuidance,
     archive,
     biographies,
     userStats,
