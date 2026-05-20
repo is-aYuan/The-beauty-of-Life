@@ -27,6 +27,7 @@ import {
 } from "../lib/biographyStyles.js";
 import { buildMemoirTitle } from "../lib/memoirTitle.js";
 import { useStoryEngine } from "../hooks/useStoryEngine";
+import { FamilyConnectionPanel } from "../components/FamilyConnectionPanel";
 import {
   FONT_SCALE_PRESETS,
   FONT_SCALE_RANGE,
@@ -539,6 +540,8 @@ function Index() {
             preferences={userPreferences}
             onChange={updateUserPreferences}
           />
+        ) : activeTab === "family" ? (
+          <FamilyConnectionPanel />
         ) : activeTab !== "story" ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center">
             <h2 className="text-4xl font-bold text-stone-800">

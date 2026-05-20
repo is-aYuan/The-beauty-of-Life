@@ -21,10 +21,8 @@ import {
   Download,
 } from "lucide-react";
 import { TopicProgressPanel } from "../components/admin/TopicProgressPanel";
-import {
-  BIOGRAPHY_STYLE_OPTIONS,
-  DEFAULT_BIOGRAPHY_STYLE_ID,
-} from "../lib/biographyStyles.js";
+import { BIOGRAPHY_STYLE_OPTIONS, DEFAULT_BIOGRAPHY_STYLE_ID } from "../lib/biographyStyles.js";
+import { FamilyVoicePanel } from "../components/admin/FamilyVoicePanel";
 import type { TopicProfile } from "../lib/biographyTopics";
 
 export const Route = createFileRoute("/admin")({
@@ -53,6 +51,7 @@ const TABS = [
   { id: "summary", label: "叙事摘要" },
   { id: "topics", label: "主题进度" },
   { id: "memory", label: "记忆档案" },
+  { id: "familyVoice", label: "亲情声音" },
   { id: "book", label: "成品自传" },
 ] as const;
 
@@ -424,6 +423,11 @@ function UserDetailModal({
     if (activeTab === "topics") url = `${API_BASE}/api/admin/user/${user.id}/topic-profile`;
     if (activeTab === "memory") url = `${API_BASE}/api/admin/user/${user.id}/memory-profile`;
     if (activeTab === "book") url = `${API_BASE}/api/admin/user/${user.id}/biographies`;
+    if (activeTab === "familyVoice") {
+      setData(null);
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     authFetch(url)
@@ -659,6 +663,8 @@ function UserDetailModal({
                     </div>
                   </div>
                 ))}
+
+              {activeTab === "familyVoice" && <FamilyVoicePanel />}
 
               {activeTab === "book" &&
                 (!Array.isArray(data) || data.length === 0 ? (
