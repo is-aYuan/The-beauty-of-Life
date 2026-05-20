@@ -14,10 +14,13 @@ import {
   saveLocalUserPreferences,
   type UserPreferences,
 } from "../lib/userPreferences.js";
+import { getRuntimeConfig } from "../lib/runtimeConfig.js";
+
+const runtimeConfig = getRuntimeConfig(import.meta.env);
 
 const CONFIG = {
-  API_BASE: "http://localhost:8000",
-  WS_URL: "ws://localhost:8000/ws/chat",
+  API_BASE: runtimeConfig.apiBase,
+  WS_URL: runtimeConfig.wsUrl,
   RECONNECT: { BASE_DELAY: 1000, MAX_DELAY: 30000, MULTIPLIER: 2 },
   AUDIO: { TARGET_SAMPLE_RATE: 16000, BUFFER_SIZE: 4096 },
   VAD: { SILENCE_THRESHOLD_DB: -35, SILENCE_DURATION_MS: 4000, FFT_SIZE: 2048, SMOOTHING: 0.8 },

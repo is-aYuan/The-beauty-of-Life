@@ -100,3 +100,19 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
 DEEPSEEK_BIOGRAPHY_MODEL=deepseek-v4-pro
 ```
+
+## 前端部署配置
+
+线上构建 `lovable_ui` 前，需要让前端请求线上后端，而不是本地 `localhost`：
+
+```env
+VITE_API_BASE=https://你的正式域名
+VITE_WS_URL=wss://你的正式域名/ws/chat
+```
+
+本地开发可以不设置这两个变量，默认仍然使用：
+
+```txt
+http://localhost:8000
+ws://localhost:8000/ws/chat
+```

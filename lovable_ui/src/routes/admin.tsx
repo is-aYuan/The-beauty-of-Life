@@ -23,6 +23,7 @@ import {
 import { TopicProgressPanel } from "../components/admin/TopicProgressPanel";
 import { BIOGRAPHY_STYLE_OPTIONS, DEFAULT_BIOGRAPHY_STYLE_ID } from "../lib/biographyStyles.js";
 import { FamilyVoicePanel } from "../components/admin/FamilyVoicePanel";
+import { getRuntimeConfig } from "../lib/runtimeConfig.js";
 import type { TopicProfile } from "../lib/biographyTopics";
 
 export const Route = createFileRoute("/admin")({
@@ -57,7 +58,7 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = getRuntimeConfig(import.meta.env).apiBase;
 
 function formatTime(isoStr?: string) {
   if (!isoStr) return "";
