@@ -79,10 +79,22 @@ const {
     speechRateToTtsSpeed,
 } = require('./lib/userPreferences');
 const {
+    getProviderConfig,
+    getProviderSummary,
+} = require('./lib/providerConfig');
+const {
+    createAiProvider,
+} = require('./lib/ai');
+const {
+    createVoiceProvider,
+} = require('./lib/voice');
+const {
     getClientIp,
     recordUserConsent,
     validateConsentInput,
 } = require('./lib/legalConsent');
+
+const PROVIDER_CONFIG = getProviderConfig(process.env);
 
 // ==================== CloudBase 初始化 ====================
 const cloudbase = require('@cloudbase/node-sdk');
@@ -104,10 +116,9 @@ const TtsClient = require('tencentcloud-sdk-nodejs-tts').tts.v20190823.Client;
 
 // ==================== 配置 ====================
 const PORT = 8000;
-const SECRET_ID = process.env.TENCENT_SECRET_ID;
-const SECRET_KEY = process.env.TENCENT_SECRET_KEY;
-const REGION = process.env.TENCENT_REGION || 'ap-guangzhou';
-const HUNYUAN_MODEL = process.env.HUNYUAN_MODEL || 'hunyuan-turbos-latest';
+const SECRET_ID = PROVIDER_CONFIG.tencent.secretId;
+const SECRET_KEY = PROVIDER_CONFIG.tencent.secretKey;
+const REGION = PROVIDER_CONFIG.tencent.region;
 const AI_SYSTEM_PROMPT = process.env.AI_SYSTEM_PROMPT || '你是故事坊的AI助手，专门帮助老年人记录家庭故事和记忆。请用温暖、耐心、简洁的语气回复，每次回复不超过100字。鼓励老人继续讲述，适当提问引导。';
 const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || SECRET_KEY || 'story-workshop-dev-secret';
 
@@ -134,6 +145,19 @@ const ttsClient = new TtsClient({
     ...commonConfig,
     profile: { ...commonConfig.profile, httpProfile: { endpoint: 'tts.tencentcloudapi.com' } },
 });
+
+// ==================== AI/语音供应商路由 ====================
+const aiProvider = createAiProvider(PROVIDER_CONFIG, {
+    hunyuanClient,
+});
+
+const voiceProvider = createVoiceProvider(PROVIDER_CONFIG, {
+    asrClient,
+    ttsClient,
+    speechRateToTtsSpeed,
+});
+
+console.log('[Provider] 当前模型供应商配置:', getProviderSummary(PROVIDER_CONFIG));
 
 // ==================== DeepSeek 客户端（叙事摘要提取） ====================
 const OpenAI = require('openai');
@@ -613,7 +637,8 @@ async function getUserSessions(userId) {
 async function getUserConversations(userId) {
     const result = await db.collection('conversations')
         .where({ userId })
-        .orderBy('timestamp', 'asc')
+        .orderBy('timestamp', 'desc')
+        .limit(200)
         .get();
     return result.data;
 }
@@ -957,16 +982,18 @@ function getAuthHeader(req) {
 }
 
 async function getAdminStats() {
-    const users = await db.collection('users').get();
-    const sessions = await db.collection('sessions').get();
-    const conversations = await db.collection('conversations').get();
-    const summaries = await db.collection('summaries').get();
+    const [users, sessions, conversations, summaries] = await Promise.all([
+        db.collection('users').count(),
+        db.collection('sessions').count(),
+        db.collection('conversations').count(),
+        db.collection('summaries').count(),
+    ]);
 
     return {
-        totalUsers: users.data.length,
-        totalSessions: sessions.data.length,
-        totalConversations: conversations.data.length,
-        totalSummaries: summaries.data.length,
+        totalUsers: users.total || 0,
+        totalSessions: sessions.total || 0,
+        totalConversations: conversations.total || 0,
+        totalSummaries: summaries.total || 0,
     };
 }
 
@@ -2394,18 +2421,9 @@ async function startRecommendationQuestion(sessionId, session, msg) {
 
 async function recognizeSpeech(audioBuffer) {
     try {
-        const audioBase64 = audioBuffer.toString('base64');
-        const params = {
-            EngSerViceType: '16k_zh',
-            SourceType: 1,
-            VoiceFormat: 'pcm',
-            Data: audioBase64,
-            DataLen: audioBuffer.length,
-        };
-        const result = await asrClient.SentenceRecognition(params);
-        return result.Result || null;
+        return await voiceProvider.recognizeSpeech(audioBuffer);
     } catch (err) {
-        console.error('[ASR] 识别失败:', err.message || err);
+        console.error(`[ASR:${voiceProvider.name}] 识别失败:`, err.message || err);
         return null;
     }
 }
@@ -2435,15 +2453,11 @@ async function chatWithAI(sessionId, session, userText) {
             ...session.conversationHistory,
         ];
 
-        const params = {
-            Model: HUNYUAN_MODEL,
-            Messages: messages,
-            Temperature: 0.7,
-            TopP: 0.9,
-        };
-
-        const result = await hunyuanClient.ChatCompletions(params);
-        let aiReply = result.Choices?.[0]?.Message?.Content || '抱歉，我没有理解，请再说一次。';
+        let aiReply = await aiProvider.completeChat({
+            messages,
+            temperature: 0.7,
+            topP: 0.9,
+        }) || '抱歉，我没有理解，请再说一次。';
         const selectedTopic = topicProfile ? getSelectedTopic(topicProfile, session.currentTopicId) : null;
         const safeReply = normalizeQuestionForElder({
             question: aiReply,
@@ -2459,7 +2473,7 @@ async function chatWithAI(sessionId, session, userText) {
         }
         return aiReply;
     } catch (err) {
-        console.error('[混元] 对话失败:', err.message || err);
+        console.error(`[${aiProvider.name}] 对话失败:`, err.message || err);
         if (session.pendingRecommendationQuestion) {
             session.pendingRecommendationQuestion = null;
         }
@@ -2518,19 +2532,9 @@ async function analyzeTopicProgressFromTurn(sessionId, session, userText, aiRepl
 
 async function synthesizeSpeech(text, userPreferences = DEFAULT_USER_PREFERENCES) {
     try {
-        const params = {
-            Text: text,
-            SessionId: `tts_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            VoiceType: 1002,
-            Codec: 'mp3',
-            SampleRate: 16000,
-            Speed: speechRateToTtsSpeed(userPreferences),
-            Volume: 8,
-        };
-        const result = await ttsClient.TextToVoice(params);
-        return result.Audio ? Buffer.from(result.Audio, 'base64') : null;
+        return await voiceProvider.synthesizeSpeech(text, userPreferences);
     } catch (err) {
-        console.error('[TTS] 合成失败:', err.message || err);
+        console.error(`[TTS:${voiceProvider.name}] 合成失败:`, err.message || err);
         return null;
     }
 }
@@ -2546,11 +2550,14 @@ server.listen(PORT, () => {
     console.log('\n  故事坊后端服务已启动');
     console.log(`  WebSocket: ws://localhost:${PORT}/ws/chat`);
     console.log(`  健康检查: http://localhost:${PORT}/health`);
-    console.log(`  AI 模型: ${HUNYUAN_MODEL}`);
+    console.log(`  AI Provider: ${PROVIDER_CONFIG.llmProvider}`);
+    console.log(`  语音 Provider: ${PROVIDER_CONFIG.voiceProvider}`);
+    console.log(`  混元模型: ${PROVIDER_CONFIG.tencent.hunyuanModel}`);
+    console.log(`  方舟接入点: ${PROVIDER_CONFIG.ark.chatModel || '未配置'}`);
     console.log(`  CloudBase 环境: ${process.env.TCB_ENV_ID}`);
     console.log(`  数据存储: 腾讯云 CloudBase + 本地音频\n`);
 
-    if (!SECRET_ID || SECRET_ID === '你的SecretId') {
+    if (PROVIDER_CONFIG.voiceProvider === 'tencent' && (!SECRET_ID || SECRET_ID === '你的SecretId')) {
         console.warn('  ⚠️  请在 .env 文件中配置腾讯云 API 密钥');
         console.warn('  获取地址: https://console.cloud.tencent.com/cam/capi\n');
     }

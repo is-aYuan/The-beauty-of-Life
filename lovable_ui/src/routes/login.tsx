@@ -55,26 +55,32 @@ function LoginPage() {
     
     setIsLoading(true);
     setErrorMsg("");
-    
-    let result;
-    if (needsPasswordSetup) {
-      result = await setUserPassword(phone, password, consent);
-    } else if (isLogin) {
-      result = await login(phone, password, consent);
-    } else {
-      result = await register(phone, name, age, password, consent);
-    }
-    
-    setIsLoading(false);
-    if (result.success) {
-      navigate({ to: "/mic-setup" });
-    } else if (result.needSetPassword) {
-      setNeedsPasswordSetup(true);
-      setPassword("");
-      setConfirmPassword("");
-      setErrorMsg(result.message || "请先设置登录密码");
-    } else {
-      setErrorMsg(result.message || "操作失败，请重试");
+
+    try {
+      let result;
+      if (needsPasswordSetup) {
+        result = await setUserPassword(phone, password, consent);
+      } else if (isLogin) {
+        result = await login(phone, password, consent);
+      } else {
+        result = await register(phone, name, age, password, consent);
+      }
+
+      if (result.success) {
+        navigate({ to: "/mic-setup" });
+      } else if (result.needSetPassword) {
+        setNeedsPasswordSetup(true);
+        setPassword("");
+        setConfirmPassword("");
+        setErrorMsg(result.message || "请先设置登录密码");
+      } else {
+        setErrorMsg(result.message || "操作失败，请重试");
+      }
+    } catch (error) {
+      console.error(error);
+      setErrorMsg("连接服务器失败，请确认后端服务已启动。");
+    } finally {
+      setIsLoading(false);
     }
   };
 

@@ -28,6 +28,17 @@ test('loads default local user preferences when storage is empty', async () => {
     assert.deepEqual(prefs, DEFAULT_USER_PREFERENCES);
 });
 
+test('loads default local user preferences during server rendering without window', async () => {
+    const {
+        DEFAULT_USER_PREFERENCES,
+        loadLocalUserPreferences,
+    } = await import('../lovable_ui/src/lib/userPreferences.js');
+
+    const prefs = loadLocalUserPreferences();
+
+    assert.deepEqual(prefs, DEFAULT_USER_PREFERENCES);
+});
+
 test('saves normalized user preferences to local storage', async () => {
     const {
         USER_PREFERENCES_STORAGE_KEY,

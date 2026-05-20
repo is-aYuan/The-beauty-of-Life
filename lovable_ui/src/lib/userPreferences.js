@@ -38,6 +38,11 @@ function normalizePreset(value, presets, fallback = "normal") {
   return Object.prototype.hasOwnProperty.call(presets, value) ? value : fallback;
 }
 
+function getBrowserStorage() {
+  if (typeof window === "undefined") return null;
+  return window.localStorage;
+}
+
 export function normalizeUserPreferences(input = {}) {
   const speechRatePreset = normalizePreset(input.speechRatePreset, SPEECH_RATE_PRESETS);
   const fontSizePreset = normalizePreset(input.fontSizePreset, FONT_SCALE_PRESETS);
@@ -60,7 +65,9 @@ export function normalizeUserPreferences(input = {}) {
   };
 }
 
-export function loadLocalUserPreferences(storage = window.localStorage) {
+export function loadLocalUserPreferences(storage = getBrowserStorage()) {
+  if (!storage) return { ...DEFAULT_USER_PREFERENCES };
+
   try {
     const raw = storage.getItem(USER_PREFERENCES_STORAGE_KEY);
     return normalizeUserPreferences(raw ? JSON.parse(raw) : null);
@@ -69,9 +76,11 @@ export function loadLocalUserPreferences(storage = window.localStorage) {
   }
 }
 
-export function saveLocalUserPreferences(storage = window.localStorage, input) {
+export function saveLocalUserPreferences(storage = getBrowserStorage(), input) {
   const preferences = normalizeUserPreferences(input);
-  storage.setItem(USER_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+  if (storage) {
+    storage.setItem(USER_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+  }
   return preferences;
 }
 
