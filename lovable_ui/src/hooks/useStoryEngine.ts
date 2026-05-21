@@ -31,7 +31,13 @@ const CONFIG = {
 let sharedAudioContext: window.AudioContext | null = null;
 let audioUnlocked = false;
 
-export type User = { userId: string; phone: string; name: string; age?: number; authToken?: string };
+export type User = {
+  userId: string;
+  phone: string;
+  name: string;
+  age?: number;
+  authToken?: string;
+};
 export type ConvoState = "idle" | "userRecording" | "aiThinking" | "aiTalking";
 export type ChatMessage = { id: number; role: "ai" | "user"; text: string };
 export type LegalConsentInput = {
@@ -55,6 +61,7 @@ export function useStoryEngine() {
   const [networkStatus, setNetworkStatus] = useState<"online" | "offline">("offline");
   const [convoState, setConvoState] = useState<ConvoState>("idle");
   const [subtitle, setSubtitle] = useState("");
+  const [recorderError, setRecorderError] = useState("");
   const [userStats, setUserStats] = useState({ totalConversations: 0, estimatedDurationMin: 0 });
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [hasBiography, setHasBiography] = useState(false);
@@ -71,14 +78,14 @@ export function useStoryEngine() {
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const userPreferencesRef = useRef<UserPreferences>(userPreferences);
-  
+
   // Audio Refs
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const analyserNodeRef = useRef<AnalyserNode | null>(null);
   const scriptProcessorRef = useRef<window.ScriptProcessorNode | null>(null);
   const sourceNodeRef = useRef<window.MediaStreamAudioSourceNode | null>(null);
   const vadAnimationFrameRef = useRef<number | null>(null);
-  
+
   const recordingStateRef = useRef<"idle" | "recording">("idle");
   const isSilentRef = useRef(false);
   const silenceStartTimeRef = useRef(0);
@@ -274,10 +281,12 @@ export function useStoryEngine() {
     setUserPreferences(next);
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: "update_preferences",
-        preferences: next,
-      }));
+      wsRef.current.send(
+        JSON.stringify({
+          type: "update_preferences",
+          preferences: next,
+        }),
+      );
     }
 
     if (!user) return next;
@@ -315,7 +324,12 @@ export function useStoryEngine() {
   // Audio Context Init
   const initAudioContext = useCallback(() => {
     if (!sharedAudioContext) {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) {
+        throw new Error("当前浏览器不支持音频上下文");
+      }
       sharedAudioContext = new AudioCtx();
     }
     return sharedAudioContext;
@@ -341,7 +355,7 @@ export function useStoryEngine() {
       wsRef.current.close();
     }
     setNetworkStatus("offline");
-    
+
     try {
       wsRef.current = new WebSocket(CONFIG.WS_URL);
       wsRef.current.binaryType = "arraybuffer";
@@ -355,12 +369,14 @@ export function useStoryEngine() {
       setNetworkStatus("online");
       reconnectAttemptsRef.current = 0;
       if (user) {
-        wsRef.current?.send(JSON.stringify({
-          type: "login",
-          phone: user.phone,
-          authToken: user.authToken,
-          userPreferences: userPreferencesRef.current,
-        }));
+        wsRef.current?.send(
+          JSON.stringify({
+            type: "login",
+            phone: user.phone,
+            authToken: user.authToken,
+            userPreferences: userPreferencesRef.current,
+          }),
+        );
       }
     };
 
@@ -387,8 +403,9 @@ export function useStoryEngine() {
   const scheduleReconnect = useCallback(() => {
     if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     const delay = Math.min(
-      CONFIG.RECONNECT.BASE_DELAY * Math.pow(CONFIG.RECONNECT.MULTIPLIER, reconnectAttemptsRef.current),
-      CONFIG.RECONNECT.MAX_DELAY
+      CONFIG.RECONNECT.BASE_DELAY *
+        Math.pow(CONFIG.RECONNECT.MULTIPLIER, reconnectAttemptsRef.current),
+      CONFIG.RECONNECT.MAX_DELAY,
     );
     reconnectAttemptsRef.current++;
     reconnectTimerRef.current = setTimeout(connectWebSocket, delay);
@@ -439,7 +456,7 @@ export function useStoryEngine() {
       if (msg.text) {
         setSubtitle(msg.text);
         if (msg.status === "ai_speaking") {
-           setChatHistory(prev => [...prev, { id: Date.now(), role: "ai", text: msg.text }]);
+          setChatHistory((prev) => [...prev, { id: Date.now(), role: "ai", text: msg.text }]);
         }
       }
 
@@ -484,27 +501,31 @@ export function useStoryEngine() {
     }
     isPlayingRef.current = true;
     setConvoState("aiTalking");
-    
+
     const ctx = initAudioContext();
     const buffer = playbackQueueRef.current.shift();
     const source = ctx.createBufferSource();
     source.buffer = buffer!;
     source.connect(ctx.destination);
-    
+
     source.onended = () => {
       currentSourceRef.current = null;
       playNextInQueue(audioSessionId);
     };
-    
+
     currentSourceRef.current = source;
     source.start(0);
   };
 
   const stopPlayback = () => {
     if (currentSourceRef.current) {
-        currentSourceRef.current.onended = null;
-        try { currentSourceRef.current.stop(); } catch(e) {}
-        currentSourceRef.current = null;
+      currentSourceRef.current.onended = null;
+      try {
+        currentSourceRef.current.stop();
+      } catch (error) {
+        console.warn("[audio] stop playback failed", error);
+      }
+      currentSourceRef.current = null;
     }
     playbackQueueRef.current = [];
     isPlayingRef.current = false;
@@ -513,29 +534,42 @@ export function useStoryEngine() {
   // Recording logic
   const startRecordingCore = async (onStop?: () => void) => {
     if (recordingStateRef.current === "recording") return false;
-    
+
+    setRecorderError("");
+
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      setRecorderError("手机录音需要 HTTPS 环境，请使用正式域名或 HTTPS 测试地址。");
+      return false;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setRecorderError("当前浏览器不支持麦克风录音。");
+      return false;
+    }
+
     try {
       if (!mediaStreamRef.current) {
         mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         });
       }
     } catch (e) {
+      setRecorderError("麦克风没有开启，请允许浏览器使用麦克风。");
       return false;
     }
 
     const ctx = initAudioContext();
     const sampleRate = ctx.sampleRate;
-    
+
     analyserNodeRef.current = ctx.createAnalyser();
     analyserNodeRef.current.fftSize = CONFIG.VAD.FFT_SIZE;
     analyserNodeRef.current.smoothingTimeConstant = CONFIG.VAD.SMOOTHING;
-    
+
     sourceNodeRef.current = ctx.createMediaStreamSource(mediaStreamRef.current);
     scriptProcessorRef.current = ctx.createScriptProcessor(CONFIG.AUDIO.BUFFER_SIZE, 1, 1);
-    
+
     const downsampleRatio = sampleRate / CONFIG.AUDIO.TARGET_SAMPLE_RATE;
-    
+
     scriptProcessorRef.current.onaudioprocess = (e) => {
       if (recordingStateRef.current !== "recording") return;
       const inputData = e.inputBuffer.getChannelData(0);
@@ -548,39 +582,52 @@ export function useStoryEngine() {
       const pcmView = new DataView(pcmBuffer);
       for (let i = 0; i < newLength; i++) {
         let sample = Math.max(-1, Math.min(1, downsampled[i]));
-        sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+        sample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
         pcmView.setInt16(i * 2, sample, true);
       }
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(pcmBuffer);
       }
     };
-    
+
     sourceNodeRef.current.connect(analyserNodeRef.current);
     sourceNodeRef.current.connect(scriptProcessorRef.current);
     scriptProcessorRef.current.connect(ctx.destination);
-    
+
     recordingStateRef.current = "recording";
     recordingStartTimeRef.current = Date.now();
     isSilentRef.current = false;
     explicitStopCallbackRef.current = onStop || null;
-    
+
     setConvoState("userRecording");
     return true;
   };
 
   const stopRecording = useCallback((sendEvent = true) => {
+    const wasRecording = recordingStateRef.current === "recording";
+    if (!wasRecording) {
+      return false;
+    }
+
     if (scriptProcessorRef.current) {
       scriptProcessorRef.current.onaudioprocess = null;
-      try { scriptProcessorRef.current.disconnect(); } catch (e) {}
+      try {
+        scriptProcessorRef.current.disconnect();
+      } catch (error) {
+        console.warn("[audio] disconnect recorder processor failed", error);
+      }
       scriptProcessorRef.current = null;
     }
     if (sourceNodeRef.current) {
-      try { sourceNodeRef.current.disconnect(); } catch (e) {}
+      try {
+        sourceNodeRef.current.disconnect();
+      } catch (error) {
+        console.warn("[audio] disconnect recorder source failed", error);
+      }
       sourceNodeRef.current = null;
     }
     recordingStateRef.current = "idle";
-    
+
     if (vadAnimationFrameRef.current) {
       cancelAnimationFrame(vadAnimationFrameRef.current);
       vadAnimationFrameRef.current = null;
@@ -594,20 +641,22 @@ export function useStoryEngine() {
       explicitStopCallbackRef.current();
       explicitStopCallbackRef.current = null;
     }
+
+    return true;
   }, []);
 
   // VAD Loop (For Auto Mode and Visualizer)
   const startVADLoop = useCallback(() => {
     if (!analyserNodeRef.current) return;
     const analyser = analyserNodeRef.current;
-    
+
     const bufferLength = analyser.fftSize;
     const dataArray = new Uint8Array(bufferLength);
     const freqData = new Uint8Array(analyser.frequencyBinCount);
 
     const analyze = () => {
       if (recordingStateRef.current !== "recording") return;
-      
+
       analyser.getByteTimeDomainData(dataArray);
       analyser.getByteFrequencyData(freqData);
       setFrequencyData(new Uint8Array(freqData));
@@ -656,23 +705,26 @@ export function useStoryEngine() {
     const started = await startRecordingCore(() => setConvoState("idle"));
     if (started) {
       if (!vadAnimationFrameRef.current) {
-         // Start dummy loop just for visualizer
-         const updateVis = () => {
-           if(recordingStateRef.current === "recording" && analyserNodeRef.current) {
-             const freqData = new Uint8Array(analyserNodeRef.current.frequencyBinCount);
-             analyserNodeRef.current.getByteFrequencyData(freqData);
-             setFrequencyData(new Uint8Array(freqData));
-             vadAnimationFrameRef.current = requestAnimationFrame(updateVis);
-           }
-         };
-         vadAnimationFrameRef.current = requestAnimationFrame(updateVis);
+        // Start dummy loop just for visualizer
+        const updateVis = () => {
+          if (recordingStateRef.current === "recording" && analyserNodeRef.current) {
+            const freqData = new Uint8Array(analyserNodeRef.current.frequencyBinCount);
+            analyserNodeRef.current.getByteFrequencyData(freqData);
+            setFrequencyData(new Uint8Array(freqData));
+            vadAnimationFrameRef.current = requestAnimationFrame(updateVis);
+          }
+        };
+        vadAnimationFrameRef.current = requestAnimationFrame(updateVis);
       }
     }
+    return started;
   };
 
   const stopManualRecord = () => {
-    stopRecording(true);
-    setConvoState("aiThinking");
+    const stopped = stopRecording(true);
+    if (stopped) {
+      setConvoState("aiThinking");
+    }
   };
 
   const startAutoRecord = async () => {
@@ -682,11 +734,14 @@ export function useStoryEngine() {
     if (started) {
       startVADLoop();
     }
+    return started;
   };
 
   const stopAutoRecord = () => {
-    stopRecording(true);
-    setConvoState("aiThinking");
+    const stopped = stopRecording(true);
+    if (stopped) {
+      setConvoState("aiThinking");
+    }
   };
 
   const stopAll = () => {
@@ -736,14 +791,16 @@ export function useStoryEngine() {
       return false;
     }
 
-    wsRef.current.send(JSON.stringify({
-      type: "start_recommendation_question",
-      topicId: recommendation.topicId,
-      question: recommendation.question,
-      title: recommendation.title,
-      sourceType: recommendation.sourceType,
-      sourceId: recommendation.sourceId,
-    }));
+    wsRef.current.send(
+      JSON.stringify({
+        type: "start_recommendation_question",
+        topicId: recommendation.topicId,
+        question: recommendation.question,
+        title: recommendation.title,
+        sourceType: recommendation.sourceType,
+        sourceId: recommendation.sourceId,
+      }),
+    );
     return true;
   };
 
@@ -782,6 +839,7 @@ export function useStoryEngine() {
     userStats,
     chatHistory,
     frequencyData,
+    recorderError,
     login,
     register,
     setPassword,
@@ -797,6 +855,6 @@ export function useStoryEngine() {
     generateBiography,
     activateArchiveRecommendation,
     updateUserPreferences,
-    unlockAudioContext
+    unlockAudioContext,
   };
 }

@@ -27,7 +27,9 @@ import {
 } from "../lib/biographyStyles.js";
 import { buildMemoirTitle } from "../lib/memoirTitle.js";
 import { useStoryEngine } from "../hooks/useStoryEngine";
+import { useIsMobile } from "../hooks/use-mobile";
 import { FamilyConnectionPanel } from "../components/FamilyConnectionPanel";
+import { MobileAppShell } from "../components/mobile/MobileAppShell";
 import {
   FONT_SCALE_PRESETS,
   FONT_SCALE_RANGE,
@@ -53,6 +55,13 @@ const NAV_ITEMS: { id: Tab; label: string; icon: typeof Mic }[] = [
   { id: "settings", label: "设置", icon: SettingsIcon },
 ];
 
+const MOBILE_NAV_ITEMS: { id: Tab; label: string; icon: typeof Mic }[] = [
+  { id: "story", label: "对话", icon: Mic },
+  { id: "organizer", label: "回忆库", icon: BookOpen },
+  { id: "family", label: "家庭", icon: Heart },
+  { id: "settings", label: "设置", icon: SettingsIcon },
+];
+
 const TAB_TITLES: Record<Tab, string> = {
   story: "讲我的故事",
   organizer: "回忆库",
@@ -75,7 +84,7 @@ const FONT_SIZE_OPTIONS: { id: Exclude<FontSizePreset, "custom">; label: string 
 function MiniVisualizer({ freqData }: { freqData: Uint8Array | null }) {
   const bars = Array.from({ length: 48 }, (_, i) => {
     if (!freqData) return 10 + Math.random() * 5;
-    const step = Math.floor(Math.min(freqData.length, 1024) / 48); 
+    const step = Math.floor(Math.min(freqData.length, 1024) / 48);
     let sum = 0;
     for (let j = 0; j < step; j++) {
       sum += freqData[i * step + j] || 0;
@@ -153,13 +162,14 @@ function SettingsPanel({
 }) {
   const [previewSpeaking, setPreviewSpeaking] = useState(false);
   const previewText = "这是预览文字：我会陪您慢慢讲，把故事整理成回忆录。";
-  const speechRateLabel = preferences.speechRate <= -1.75
-    ? "最慢"
-    : preferences.speechRate < -0.25
-      ? "偏慢"
-      : preferences.speechRate < 1.25
-        ? "标准"
-        : "偏快";
+  const speechRateLabel =
+    preferences.speechRate <= -1.75
+      ? "最慢"
+      : preferences.speechRate < -0.25
+        ? "偏慢"
+        : preferences.speechRate < 1.25
+          ? "标准"
+          : "偏快";
 
   const speakPreview = () => {
     if (!("speechSynthesis" in window)) return;
@@ -296,6 +306,7 @@ function Index() {
     userStats,
     chatHistory,
     frequencyData,
+    recorderError,
     logout,
     startManualRecord,
     stopManualRecord,
@@ -316,6 +327,7 @@ function Index() {
   const [styleDialogOpen, setStyleDialogOpen] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const isMobile = useIsMobile();
 
   const hasLocalUser = !!localStorage.getItem("story_user");
 
@@ -363,7 +375,8 @@ function Index() {
     subtitle,
     serverEntryGuidance,
   });
-  const shouldShowEntryPrompt = Boolean(entryGuidance.storyPrompt) &&
+  const shouldShowEntryPrompt =
+    Boolean(entryGuidance.storyPrompt) &&
     convoState !== "userRecording" &&
     (convoState !== "aiTalking" || chatHistory.length === 0);
 
@@ -404,6 +417,269 @@ function Index() {
     }
   };
 
+  // 模块：移动端主内容。手机端只渲染当前模块，避免桌面三栏压缩到窄屏。
+  const mobileMainContent =
+    activeTab === "organizer" ? (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden px-4 py-4">
+        <header className="shrink-0 border-b border-amber-200 pb-4">
+          <h2 className="text-2xl font-black text-stone-900">回忆库</h2>
+          <p className="mt-1 text-base font-semibold text-stone-600">AI 帮您把刚刚讲过的回忆收好</p>
+        </header>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-4">
+          {!archive ? (
+            <div className="rounded-2xl bg-white/85 p-5 text-center shadow-sm">
+              <p className="text-lg font-bold text-stone-600">正在整理您的回忆...</p>
+            </div>
+          ) : (
+            <>
+              <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-amber-100">
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    <BookOpen className="h-6 w-6 text-amber-700" />
+                    <h3 className="text-xl font-black text-stone-800">我的回忆录</h3>
+                  </div>
+                  <button
+                    onClick={handleGenerateBiography}
+                    disabled={biographyGenerating}
+                    className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-stone-800 px-4 text-base font-black text-amber-50 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Sparkles className={`h-5 w-5 ${biographyGenerating ? "animate-spin" : ""}`} />
+                    {biographyGenerating ? "正在整理..." : "生成最新回忆录"}
+                  </button>
+                </div>
+
+                {latestBiography ? (
+                  <div className="mt-4 space-y-3">
+                    <div className="rounded-xl bg-amber-50 p-3">
+                      <p className="text-xl font-black text-stone-900">
+                        《{latestBiography.title || "我的回忆录"}》
+                      </p>
+                      <p className="mt-1 text-base font-semibold text-stone-600">
+                        {formatArchiveDate(
+                          latestBiography.updatedAt || latestBiography.createdAt,
+                        ) || "最近整理"}
+                        {latestBiography.chapterCount
+                          ? ` · ${latestBiography.chapterCount} 章`
+                          : ""}
+                        {latestBiography.wordCount ? ` · 约 ${latestBiography.wordCount} 字` : ""}
+                      </p>
+                    </div>
+                    {(latestBiography.chapters || []).length > 0 ? (
+                      <div className="space-y-3">
+                        {(latestBiography.chapters || []).map((chapter) => (
+                          <article
+                            key={`${chapter.number}-${chapter.title}`}
+                            className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-amber-100"
+                          >
+                            <p className="text-lg font-black text-stone-800">
+                              第 {chapter.number} 章：{chapter.title}
+                            </p>
+                            <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-stone-600">
+                              {chapter.content}
+                            </p>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="rounded-xl bg-amber-50 p-3 text-base text-stone-600">
+                        回忆录已经生成，章节内容正在整理展示中。
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-4 text-base leading-relaxed text-stone-600">
+                    还没有生成回忆录。等至少一个主题进度达到 80% 后，我就可以帮您整理成一版故事。
+                  </p>
+                )}
+              </section>
+
+              <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-amber-100">
+                <div className="flex items-center gap-3">
+                  <BookOpen className="h-6 w-6 text-amber-700" />
+                  <h3 className="text-xl font-black text-stone-800">故事片段</h3>
+                </div>
+                <div className="mt-3 space-y-3">
+                  {archive.storySnippets.length > 0 ? (
+                    archive.storySnippets.map((story) => (
+                      <article
+                        key={`${story.sourceId}-${story.title}`}
+                        className="rounded-xl bg-amber-50/80 p-3"
+                      >
+                        <p className="text-lg font-black text-stone-800">{story.title}</p>
+                        <p className="mt-1 text-base leading-relaxed text-stone-600">
+                          {story.text}
+                        </p>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="text-base text-stone-600">故事片段还在积累中。</p>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
+        </div>
+      </div>
+    ) : activeTab === "settings" ? (
+      <div
+        data-mobile-settings
+        className="h-full overflow-y-auto px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]"
+      >
+        <SettingsPanel preferences={userPreferences} onChange={updateUserPreferences} />
+      </div>
+    ) : activeTab === "family" ? (
+      <div className="h-full overflow-y-auto px-4 py-4">
+        <FamilyConnectionPanel />
+      </div>
+    ) : activeTab !== "story" ? (
+      <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+        <h2 className="text-3xl font-black text-stone-800">{TAB_TITLES[activeTab]}</h2>
+        <p className="mt-3 text-xl leading-relaxed text-stone-600">此功能正在建设中……</p>
+      </div>
+    ) : (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <header className="shrink-0 border-b border-amber-200 px-4 py-4">
+          <h2 className="text-2xl font-black leading-tight text-stone-900">
+            {buildMemoirTitle(user.name)}
+          </h2>
+          <p className="mt-1 text-base font-semibold text-stone-600">今日陪伴</p>
+          <p className="mt-0.5 text-sm font-medium text-stone-500">
+            已记录 {userStats.totalConversations} 个对话，约 {userStats.estimatedDurationMin} 分钟
+          </p>
+        </header>
+
+        <div ref={chatScrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+          {chatHistory.map((m) =>
+            m.role === "ai" ? (
+              <div key={m.id} className="flex items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-stone-200 shadow-sm">
+                  <Bot className="h-5 w-5 text-stone-700" />
+                </div>
+                <div className="max-w-[88%] rounded-2xl rounded-tl-none bg-white p-4 shadow-sm">
+                  <p className="text-lg leading-relaxed text-stone-800">{m.text}</p>
+                </div>
+              </div>
+            ) : (
+              <div key={m.id} className="flex items-start justify-end gap-3">
+                <div className="max-w-[88%] rounded-2xl rounded-tr-none bg-amber-100 p-4 shadow-sm">
+                  <p className="text-lg leading-relaxed text-stone-800">{m.text}</p>
+                </div>
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-stone-700 shadow-sm">
+                  <User className="h-5 w-5 text-amber-50" />
+                </div>
+              </div>
+            ),
+          )}
+
+          {shouldShowEntryPrompt && (
+            <div className="border-t border-amber-200/60 pt-3">
+              <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                <p className="text-lg leading-relaxed text-blue-800">{entryGuidance.storyPrompt}</p>
+              </div>
+            </div>
+          )}
+
+          {convoState === "aiThinking" && (
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 animate-pulse items-center justify-center rounded-full bg-stone-200 shadow-sm">
+                <Bot className="h-5 w-5 text-stone-700" />
+              </div>
+              <div className="rounded-2xl rounded-tl-none border border-orange-100 bg-white p-4 shadow-sm">
+                <p className="animate-pulse text-lg leading-relaxed text-orange-600">
+                  我在帮您整理故事，马上就好...
+                </p>
+              </div>
+            </div>
+          )}
+          <div ref={chatEndRef} aria-hidden="true" />
+        </div>
+      </div>
+    );
+
+  const biographyStyleDialog = styleDialogOpen ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/55 p-6">
+      <div className="w-full max-w-2xl rounded-3xl bg-white p-7 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-black text-stone-900">选择回忆录文风</h2>
+            <p className="mt-2 text-base leading-relaxed text-stone-500">
+              请选择这次生成回忆录的表达方式。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStyleDialogOpen(false)}
+            className="rounded-full border border-stone-200 p-2 text-stone-400 hover:bg-stone-50"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mt-6 grid gap-3 md:grid-cols-2">
+          {BIOGRAPHY_STYLE_OPTIONS.map((style) => {
+            const recommended = style.id === DEFAULT_BIOGRAPHY_STYLE_ID;
+            return (
+              <button
+                key={style.id}
+                type="button"
+                onClick={() => handleSelectBiographyStyle(style.id)}
+                className={`rounded-2xl border p-5 text-left transition-transform hover:scale-[1.02] active:scale-[0.98] ${
+                  recommended
+                    ? "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
+                    : "border-stone-200 bg-white hover:bg-stone-50"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xl font-black text-stone-900">{style.label}</p>
+                  {recommended && (
+                    <span className="rounded-full bg-amber-600 px-2.5 py-1 text-xs font-bold text-white">
+                      默认
+                    </span>
+                  )}
+                </div>
+                <p className="mt-2 text-base leading-relaxed text-stone-600">{style.description}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  if (isMobile) {
+    return (
+      <>
+        <MobileAppShell
+          tabs={MOBILE_NAV_ITEMS}
+          activeTab={activeTab}
+          storyTabId="story"
+          topics={topicProfile?.topics || []}
+          currentTopicId={topicProfile?.currentTopicId}
+          recordMode={recordMode}
+          convoState={convoState}
+          networkStatus={networkStatus}
+          idleStatus={entryGuidance.idleStatus}
+          frequencyData={frequencyData}
+          recorderError={recorderError}
+          onTabChange={setActiveTab}
+          onLogout={logout}
+          onTopicSelect={selectTopic}
+          getTopicStatusLabel={getTopicStatusLabel}
+          onRecordModeChange={setRecordMode}
+          onStartManualRecord={startManualRecord}
+          onStopManualRecord={stopManualRecord}
+          onStartAutoRecord={startAutoRecord}
+          onStopAutoRecord={stopAutoRecord}
+          onStopAll={stopAll}
+        >
+          {mobileMainContent}
+        </MobileAppShell>
+        {biographyStyleDialog}
+      </>
+    );
+  }
+
   return (
     <main className="flex h-screen w-full gap-4 bg-amber-50 p-4 text-stone-900">
       {/* LEFT NAV */}
@@ -432,7 +708,7 @@ function Index() {
             );
           })}
         </nav>
-        <button 
+        <button
           onClick={logout}
           className="mt-auto flex items-center justify-center gap-2 rounded-xl bg-stone-700 p-3 hover:bg-stone-600 transition-colors text-amber-200/80"
         >
@@ -449,9 +725,7 @@ function Index() {
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <header className="border-b-2 border-amber-200 pb-5">
               <h2 className="text-4xl font-bold text-stone-800">回忆库</h2>
-              <p className="mt-2 text-xl text-stone-600">
-                AI 帮您把刚刚讲过的回忆收好
-              </p>
+              <p className="mt-2 text-xl text-stone-600">AI 帮您把刚刚讲过的回忆收好</p>
             </header>
 
             <div className="flex-1 space-y-5 overflow-y-auto py-5 pr-2">
@@ -472,7 +746,9 @@ function Index() {
                         disabled={biographyGenerating}
                         className="flex items-center gap-2 rounded-xl bg-stone-800 px-5 py-3 text-lg font-bold text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
                       >
-                        <Sparkles className={`h-5 w-5 ${biographyGenerating ? "animate-spin" : ""}`} />
+                        <Sparkles
+                          className={`h-5 w-5 ${biographyGenerating ? "animate-spin" : ""}`}
+                        />
                         {biographyGenerating ? "正在整理..." : "生成最新回忆录"}
                       </button>
                     </div>
@@ -480,17 +756,28 @@ function Index() {
                     {latestBiography ? (
                       <div className="mt-5 space-y-4">
                         <div className="rounded-xl bg-amber-50 p-4">
-                          <p className="text-2xl font-bold text-stone-900">《{latestBiography.title || "我的回忆录"}》</p>
+                          <p className="text-2xl font-bold text-stone-900">
+                            《{latestBiography.title || "我的回忆录"}》
+                          </p>
                           <p className="mt-2 text-lg text-stone-600">
-                            {formatArchiveDate(latestBiography.updatedAt || latestBiography.createdAt) || "最近整理"}
-                            {latestBiography.chapterCount ? ` · ${latestBiography.chapterCount} 章` : ""}
-                            {latestBiography.wordCount ? ` · 约 ${latestBiography.wordCount} 字` : ""}
+                            {formatArchiveDate(
+                              latestBiography.updatedAt || latestBiography.createdAt,
+                            ) || "最近整理"}
+                            {latestBiography.chapterCount
+                              ? ` · ${latestBiography.chapterCount} 章`
+                              : ""}
+                            {latestBiography.wordCount
+                              ? ` · 约 ${latestBiography.wordCount} 字`
+                              : ""}
                           </p>
                         </div>
                         {(latestBiography.chapters || []).length > 0 ? (
                           <div className="space-y-3">
                             {(latestBiography.chapters || []).map((chapter) => (
-                              <article key={`${chapter.number}-${chapter.title}`} className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-amber-100">
+                              <article
+                                key={`${chapter.number}-${chapter.title}`}
+                                className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-amber-100"
+                              >
                                 <p className="text-xl font-bold text-stone-800">
                                   第 {chapter.number} 章：{chapter.title}
                                 </p>
@@ -508,7 +795,8 @@ function Index() {
                       </div>
                     ) : (
                       <p className="mt-4 text-lg leading-relaxed text-stone-600">
-                        还没有生成回忆录。等至少一个主题进度达到 80% 后，我就可以帮您整理成一版故事。
+                        还没有生成回忆录。等至少一个主题进度达到 80%
+                        后，我就可以帮您整理成一版故事。
                       </p>
                     )}
                   </section>
@@ -521,9 +809,14 @@ function Index() {
                     <div className="mt-4 space-y-3">
                       {archive.storySnippets.length > 0 ? (
                         archive.storySnippets.map((story) => (
-                          <article key={`${story.sourceId}-${story.title}`} className="rounded-xl bg-amber-50/80 p-4">
+                          <article
+                            key={`${story.sourceId}-${story.title}`}
+                            className="rounded-xl bg-amber-50/80 p-4"
+                          >
                             <p className="text-xl font-bold text-stone-800">{story.title}</p>
-                            <p className="mt-1 text-lg leading-relaxed text-stone-600">{story.text}</p>
+                            <p className="mt-1 text-lg leading-relaxed text-stone-600">
+                              {story.text}
+                            </p>
                           </article>
                         ))
                       ) : (
@@ -536,32 +829,22 @@ function Index() {
             </div>
           </div>
         ) : activeTab === "settings" ? (
-          <SettingsPanel
-            preferences={userPreferences}
-            onChange={updateUserPreferences}
-          />
+          <SettingsPanel preferences={userPreferences} onChange={updateUserPreferences} />
         ) : activeTab === "family" ? (
           <FamilyConnectionPanel />
         ) : activeTab !== "story" ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center">
-            <h2 className="text-4xl font-bold text-stone-800">
-              {TAB_TITLES[activeTab]}
-            </h2>
-            <p className="mt-4 text-2xl leading-relaxed text-stone-600">
-              此功能正在建设中……
-            </p>
+            <h2 className="text-4xl font-bold text-stone-800">{TAB_TITLES[activeTab]}</h2>
+            <p className="mt-4 text-2xl leading-relaxed text-stone-600">此功能正在建设中……</p>
           </div>
         ) : (
           <div className="flex flex-1 flex-col overflow-hidden">
             <header className="border-b-2 border-amber-200 pb-5">
-              <h2 className="text-4xl font-bold text-stone-800">
-                {buildMemoirTitle(user.name)}
-              </h2>
-              <p className="mt-2 text-xl text-stone-600">
-                今日陪伴
-              </p>
+              <h2 className="text-4xl font-bold text-stone-800">{buildMemoirTitle(user.name)}</h2>
+              <p className="mt-2 text-xl text-stone-600">今日陪伴</p>
               <p className="mt-1 text-sm text-stone-500">
-                已记录 {userStats.totalConversations} 个对话，约 {userStats.estimatedDurationMin} 分钟
+                已记录 {userStats.totalConversations} 个对话，约 {userStats.estimatedDurationMin}{" "}
+                分钟
               </p>
             </header>
 
@@ -574,20 +857,13 @@ function Index() {
                       <Bot className="h-7 w-7 text-stone-700" />
                     </div>
                     <div className="max-w-[78%] rounded-3xl rounded-tl-none bg-white p-5 shadow-md">
-                      <p className="text-2xl leading-relaxed text-stone-800">
-                        {m.text}
-                      </p>
+                      <p className="text-2xl leading-relaxed text-stone-800">{m.text}</p>
                     </div>
                   </div>
                 ) : (
-                  <div
-                    key={m.id}
-                    className="flex items-start justify-end gap-4"
-                  >
+                  <div key={m.id} className="flex items-start justify-end gap-4">
                     <div className="max-w-[78%] rounded-3xl rounded-tr-none bg-amber-100 p-5 shadow-md">
-                      <p className="text-2xl leading-relaxed text-stone-800">
-                        {m.text}
-                      </p>
+                      <p className="text-2xl leading-relaxed text-stone-800">{m.text}</p>
                     </div>
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-stone-700 shadow-sm">
                       <User className="h-7 w-7 text-amber-50" />
@@ -599,9 +875,11 @@ function Index() {
               {/* Subtitle from stream */}
               {shouldShowEntryPrompt && (
                 <div className="flex items-start gap-4 pt-4 border-t border-amber-200/50">
-                   <div className="max-w-[100%] bg-blue-50/50 p-4 rounded-xl border border-blue-100/50">
-                     <p className="text-2xl leading-relaxed text-blue-800">{entryGuidance.storyPrompt}</p>
-                   </div>
+                  <div className="max-w-[100%] bg-blue-50/50 p-4 rounded-xl border border-blue-100/50">
+                    <p className="text-2xl leading-relaxed text-blue-800">
+                      {entryGuidance.storyPrompt}
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -624,10 +902,12 @@ function Index() {
             <div className="sticky bottom-0 border-t-2 border-amber-200 bg-amber-50 p-4">
               {/* Mode toggle */}
               <div className="mx-auto mb-4 flex w-fit rounded-full bg-amber-100 p-1 text-stone-600">
-                {([
-                  { id: "hold", label: "按住说话" },
-                  { id: "table", label: "放桌上畅聊" },
-                ] as { id: RecordMode; label: string }[]).map((opt) => {
+                {(
+                  [
+                    { id: "hold", label: "按住说话" },
+                    { id: "table", label: "放桌上畅聊" },
+                  ] as { id: RecordMode; label: string }[]
+                ).map((opt) => {
                   const active = recordMode === opt.id;
                   return (
                     <button
@@ -653,9 +933,7 @@ function Index() {
                   </p>
                 ) : convoState === "userRecording" ? (
                   <>
-                    <p className="text-xl font-bold text-emerald-600">
-                      正在听您说...
-                    </p>
+                    <p className="text-xl font-bold text-emerald-600">正在听您说...</p>
                     <MiniVisualizer freqData={frequencyData} />
                   </>
                 ) : convoState === "aiThinking" ? (
@@ -663,13 +941,9 @@ function Index() {
                     AI 正在思考处理中...
                   </p>
                 ) : convoState === "aiTalking" ? (
-                  <p className="text-xl font-medium text-blue-600">
-                    AI 正在为您朗读回应...
-                  </p>
+                  <p className="text-xl font-medium text-blue-600">AI 正在为您朗读回应...</p>
                 ) : (
-                  <p className="text-xl font-medium text-stone-700">
-                    {entryGuidance.idleStatus}
-                  </p>
+                  <p className="text-xl font-medium text-stone-700">{entryGuidance.idleStatus}</p>
                 )}
               </div>
 
@@ -680,8 +954,18 @@ function Index() {
                     disabled={networkStatus === "offline"}
                     onMouseDown={() => recordMode === "hold" && startManualRecord()}
                     onMouseUp={() => recordMode === "hold" && stopManualRecord()}
-                    onTouchStart={(e) => { e.preventDefault(); recordMode === "hold" && startManualRecord(); }}
-                    onTouchEnd={(e) => { e.preventDefault(); recordMode === "hold" && stopManualRecord(); }}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      if (recordMode === "hold") {
+                        startManualRecord();
+                      }
+                    }}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      if (recordMode === "hold") {
+                        stopManualRecord();
+                      }
+                    }}
                     onClick={() => recordMode === "table" && startAutoRecord()}
                     className="flex items-center gap-3 rounded-2xl bg-red-600 px-10 py-6 text-2xl font-bold text-white shadow-md transition-transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100 cursor-pointer"
                   >
@@ -702,13 +986,16 @@ function Index() {
                   </button>
                 </div>
               )}
-              
+
               {convoState === "userRecording" && recordMode === "hold" && (
                 <div className="flex justify-center">
-                  <div 
-                    onMouseUp={stopManualRecord} 
+                  <div
+                    onMouseUp={stopManualRecord}
                     onMouseLeave={stopManualRecord}
-                    onTouchEnd={(e) => { e.preventDefault(); stopManualRecord(); }}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      stopManualRecord();
+                    }}
                     className="flex items-center justify-center gap-3 rounded-2xl bg-stone-800 px-8 py-5 text-2xl font-bold text-amber-50 shadow-md cursor-pointer animate-pulse"
                   >
                     <Mic className="h-8 w-8 text-red-500" />
@@ -766,9 +1053,7 @@ function Index() {
                 }`}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <span className="min-w-0 text-lg font-bold leading-snug">
-                    {topic.title}
-                  </span>
+                  <span className="min-w-0 text-lg font-bold leading-snug">{topic.title}</span>
                   {active && (
                     <span className="shrink-0 rounded-full bg-stone-800 px-2 py-1 text-xs font-semibold text-amber-50">
                       正在聊
@@ -788,66 +1073,14 @@ function Index() {
                     {progress}%
                   </span>
                 </div>
-                <p className="mt-2 text-sm font-medium text-stone-600">
-                  {statusLabel}
-                </p>
+                <p className="mt-2 text-sm font-medium text-stone-600">{statusLabel}</p>
               </button>
             );
           })}
         </div>
       </aside>
 
-      {styleDialogOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/55 p-6">
-          <div className="w-full max-w-2xl rounded-3xl bg-white p-7 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-black text-stone-900">选择回忆录文风</h2>
-                <p className="mt-2 text-base leading-relaxed text-stone-500">
-                  请选择这次生成回忆录的表达方式。
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setStyleDialogOpen(false)}
-                className="rounded-full border border-stone-200 p-2 text-stone-400 hover:bg-stone-50"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="mt-6 grid gap-3 md:grid-cols-2">
-              {BIOGRAPHY_STYLE_OPTIONS.map((style) => {
-                const recommended = style.id === DEFAULT_BIOGRAPHY_STYLE_ID;
-                return (
-                  <button
-                    key={style.id}
-                    type="button"
-                    onClick={() => handleSelectBiographyStyle(style.id)}
-                    className={`rounded-2xl border p-5 text-left transition-transform hover:scale-[1.02] active:scale-[0.98] ${
-                      recommended
-                        ? "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
-                        : "border-stone-200 bg-white hover:bg-stone-50"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-xl font-black text-stone-900">{style.label}</p>
-                      {recommended && (
-                        <span className="rounded-full bg-amber-600 px-2.5 py-1 text-xs font-bold text-white">
-                          默认
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-2 text-base leading-relaxed text-stone-600">
-                      {style.description}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
+      {biographyStyleDialog}
     </main>
   );
 }
