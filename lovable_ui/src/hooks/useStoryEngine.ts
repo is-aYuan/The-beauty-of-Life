@@ -75,8 +75,11 @@ export function useStoryEngine() {
 
   // References for mutable state that doesn't need to trigger renders
   const wsRef = useRef<WebSocket | null>(null);
+  const userRef = useRef<User | null>(null);
+  const intentionalWsCloseRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const connectWebSocketRef = useRef<(() => void) | null>(null);
   const userPreferencesRef = useRef<UserPreferences>(userPreferences);
 
   // Audio Refs
@@ -103,9 +106,10 @@ export function useStoryEngine() {
   const [frequencyData, setFrequencyData] = useState<Uint8Array | null>(null);
 
   useEffect(() => {
+    userRef.current = user;
     userPreferencesRef.current = userPreferences;
     document.documentElement.style.fontSize = buildFontScaleCssValue(userPreferences);
-  }, [userPreferences]);
+  }, [user, userPreferences]);
 
   // User auth management
   useEffect(() => {
@@ -199,7 +203,7 @@ export function useStoryEngine() {
     setArchive(null);
     setBiographies([]);
     localStorage.removeItem("story_user");
-    if (wsRef.current) wsRef.current.close(1000);
+    closeWebSocket();
     setUser(null);
   };
 
@@ -349,38 +353,81 @@ export function useStoryEngine() {
     audioUnlocked = true;
   }, [initAudioContext]);
 
-  // WS Connection
+  // 模块：WebSocket 生命周期管理。区分主动关闭和异常掉线，避免清理旧连接时触发重连循环。
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  const closeWebSocket = useCallback(() => {
+    intentionalWsCloseRef.current = true;
+    clearReconnectTimer();
+
+    const socket = wsRef.current;
+    wsRef.current = null;
+    if (socket && socket.readyState <= WebSocket.OPEN) {
+      socket.close(1000, "client closed intentionally");
+    }
+
+    setWsConnected(false);
+    setNetworkStatus("offline");
+  }, [clearReconnectTimer]);
+
+  const scheduleReconnect = useCallback(() => {
+    if (!userRef.current) return;
+
+    clearReconnectTimer();
+    const delay = Math.min(
+      CONFIG.RECONNECT.BASE_DELAY *
+        Math.pow(CONFIG.RECONNECT.MULTIPLIER, reconnectAttemptsRef.current),
+      CONFIG.RECONNECT.MAX_DELAY,
+    );
+    reconnectAttemptsRef.current++;
+    reconnectTimerRef.current = setTimeout(() => {
+      connectWebSocketRef.current?.();
+    }, delay);
+  }, [clearReconnectTimer]);
+
   const connectWebSocket = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) {
-      wsRef.current.close();
+      closeWebSocket();
     }
+    intentionalWsCloseRef.current = false;
     setNetworkStatus("offline");
 
+    let socket: WebSocket;
     try {
-      wsRef.current = new WebSocket(CONFIG.WS_URL);
-      wsRef.current.binaryType = "arraybuffer";
+      socket = new WebSocket(CONFIG.WS_URL);
+      socket.binaryType = "arraybuffer";
+      wsRef.current = socket;
     } catch (e) {
       scheduleReconnect();
       return;
     }
 
-    wsRef.current.onopen = () => {
+    socket.onopen = () => {
+      if (wsRef.current !== socket) return;
+      clearReconnectTimer();
       setWsConnected(true);
       setNetworkStatus("online");
       reconnectAttemptsRef.current = 0;
-      if (user) {
-        wsRef.current?.send(
+      const currentUser = userRef.current;
+      if (currentUser) {
+        socket.send(
           JSON.stringify({
             type: "login",
-            phone: user.phone,
-            authToken: user.authToken,
+            phone: currentUser.phone,
+            authToken: currentUser.authToken,
             userPreferences: userPreferencesRef.current,
           }),
         );
       }
     };
 
-    wsRef.current.onmessage = async (event) => {
+    socket.onmessage = async (event) => {
+      if (wsRef.current !== socket) return;
       if (typeof event.data === "string") {
         handleJsonMessage(event.data);
       } else {
@@ -388,27 +435,26 @@ export function useStoryEngine() {
       }
     };
 
-    wsRef.current.onclose = (e) => {
+    socket.onclose = (e) => {
+      if (wsRef.current !== socket) return;
+      wsRef.current = null;
       setWsConnected(false);
       setNetworkStatus("offline");
-      if (e.code !== 1000) scheduleReconnect();
+      if (!intentionalWsCloseRef.current && userRef.current && e.code !== 1000) {
+        scheduleReconnect();
+      }
+      intentionalWsCloseRef.current = false;
     };
 
-    wsRef.current.onerror = () => {
+    socket.onerror = () => {
+      if (wsRef.current !== socket) return;
       setWsConnected(false);
       setNetworkStatus("offline");
     };
-  }, [user]);
+  }, [clearReconnectTimer, closeWebSocket, scheduleReconnect]);
 
-  const scheduleReconnect = useCallback(() => {
-    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-    const delay = Math.min(
-      CONFIG.RECONNECT.BASE_DELAY *
-        Math.pow(CONFIG.RECONNECT.MULTIPLIER, reconnectAttemptsRef.current),
-      CONFIG.RECONNECT.MAX_DELAY,
-    );
-    reconnectAttemptsRef.current++;
-    reconnectTimerRef.current = setTimeout(connectWebSocket, delay);
+  useEffect(() => {
+    connectWebSocketRef.current = connectWebSocket;
   }, [connectWebSocket]);
 
   useEffect(() => {
@@ -417,10 +463,9 @@ export function useStoryEngine() {
       activeAudioSessionRef.current = null;
       stopPlayback();
       stopRecording(false);
-      if (wsRef.current) wsRef.current.close(1000);
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      closeWebSocket();
     };
-  }, [user, connectWebSocket]);
+  }, [user, connectWebSocket, closeWebSocket]);
 
   // Handle incoming WS JSON
   const handleJsonMessage = (jsonStr: string) => {

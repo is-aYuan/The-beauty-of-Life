@@ -329,7 +329,8 @@ function Index() {
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const isMobile = useIsMobile();
 
-  const hasLocalUser = !!localStorage.getItem("story_user");
+  // 模块：登录态入口守卫。SSR 阶段不能读取浏览器 localStorage，只在客户端判断本地登录态。
+  const hasLocalUser = typeof localStorage !== "undefined" && !!localStorage.getItem("story_user");
 
   useEffect(() => {
     if (!hasLocalUser) {
