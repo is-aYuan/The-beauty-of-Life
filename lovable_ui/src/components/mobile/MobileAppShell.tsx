@@ -83,7 +83,6 @@ export function MobileAppShell<T extends string>({
   const handleSelectTopic = useCallback(
     (topicId: string) => {
       onTopicSelect(topicId);
-      setTopicExpanded(false);
     },
     [onTopicSelect],
   );
@@ -111,22 +110,24 @@ export function MobileAppShell<T extends string>({
             onSelectTopic={handleSelectTopic}
             getStatusLabel={getTopicStatusLabel}
           />
-          <div style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
-            <RecorderControls
-              recordMode={recordMode}
-              convoState={convoState}
-              networkStatus={networkStatus}
-              idleStatus={idleStatus}
-              frequencyData={frequencyData}
-              recorderError={recorderError}
-              onRecordModeChange={onRecordModeChange}
-              onStartManualRecord={onStartManualRecord}
-              onStopManualRecord={onStopManualRecord}
-              onStartAutoRecord={onStartAutoRecord}
-              onStopAutoRecord={onStopAutoRecord}
-              onStopAll={onStopAll}
-            />
-          </div>
+          {!topicExpanded && (
+            <div style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+              <RecorderControls
+                recordMode={recordMode}
+                convoState={convoState}
+                networkStatus={networkStatus}
+                idleStatus={idleStatus}
+                frequencyData={frequencyData}
+                recorderError={recorderError}
+                onRecordModeChange={onRecordModeChange}
+                onStartManualRecord={onStartManualRecord}
+                onStopManualRecord={onStopManualRecord}
+                onStartAutoRecord={onStartAutoRecord}
+                onStopAutoRecord={onStopAutoRecord}
+                onStopAll={onStopAll}
+              />
+            </div>
+          )}
         </>
       )}
     </main>

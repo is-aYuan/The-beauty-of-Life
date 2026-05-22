@@ -42,6 +42,20 @@ test('mobile shell separates module navigation, topic selection, and recorder co
     assert.match(recorderSource, /停止播放/);
 });
 
+test('mobile topic selection mode uses the freed recorder space for a scrollable topic grid', () => {
+    const shellSource = fs.readFileSync(mobileShellPath, 'utf8');
+    const topicSource = fs.readFileSync(topicDrawerPath, 'utf8');
+
+    assert.match(shellSource, /const handleSelectTopic[\s\S]*onTopicSelect\(topicId\);[\s\S]*\[onTopicSelect\]/);
+    assert.doesNotMatch(shellSource, /const handleSelectTopic[\s\S]*setTopicExpanded\(false\);[\s\S]*\[onTopicSelect\]/);
+    assert.match(shellSource, /\{!topicExpanded && \(/);
+    assert.match(topicSource, /模块：主题选择模式/);
+    assert.match(topicSource, /data-mobile-topic-scroll/);
+    assert.match(topicSource, /data-mobile-topic-collapse/);
+    assert.match(topicSource, /sticky bottom-0/);
+    assert.doesNotMatch(topicSource, /expanded \? "收起" : "换主题"/);
+});
+
 test('mobile navigation uses the right side action for logout instead of module expansion', () => {
     const shellSource = fs.readFileSync(mobileShellPath, 'utf8');
     const switcherPath = path.join(repoRoot, 'lovable_ui', 'src', 'components', 'mobile', 'MobileModuleSwitcher.tsx');
