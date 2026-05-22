@@ -158,10 +158,10 @@ export function RecorderControls({
               void onStartAutoRecord();
             }
           }}
-          className="flex min-h-[68px] w-full touch-none items-center justify-center gap-3 rounded-2xl bg-red-600 px-5 text-2xl font-black text-white shadow-md transition-transform active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-55"
+          className="flex min-h-[76px] w-full touch-none items-center justify-center gap-3 rounded-3xl border border-[#F5D76B] bg-[#FFEA92] px-5 text-2xl font-black text-[#241F1C] shadow-[0_10px_24px_rgba(160,120,30,0.18)] transition-transform active:scale-[0.98] disabled:cursor-not-allowed disabled:border-[#D8D0C0] disabled:bg-[#E8E1D3] disabled:text-[#8A8174]"
         >
           <Mic className="h-8 w-8" />
-          {recordMode === "hold" ? "长按说话" : "开始畅聊"}
+          {recordMode === "hold" ? "按住说话" : "开始畅聊"}
         </button>
       )}
 
@@ -182,9 +182,9 @@ export function RecorderControls({
           onMouseLeave={onStopManualRecord}
           onPointerUp={stopHoldRecording}
           onPointerCancel={stopHoldRecording}
-          className="flex min-h-[68px] w-full touch-none animate-pulse items-center justify-center gap-3 rounded-2xl bg-stone-800 px-5 text-2xl font-black text-amber-50 shadow-md"
+          className="flex min-h-[76px] w-full touch-none animate-pulse items-center justify-center gap-3 rounded-3xl border border-[#241F1C] bg-[#241F1C] px-5 text-2xl font-black text-[#FFF7D6] shadow-[0_0_0_8px_rgba(255,234,146,0.28),0_10px_24px_rgba(36,31,28,0.28)]"
         >
-          <Mic className="h-8 w-8 text-red-400" />
+          <Mic className="h-8 w-8 text-[#FFF7D6]" />
           松开发送
         </div>
       )}
@@ -201,9 +201,9 @@ export function RecorderControls({
       )}
 
       {convoState === "aiThinking" && (
-        <div className="flex min-h-[68px] w-full items-center justify-center gap-3 rounded-2xl bg-orange-600 px-5 text-2xl font-black text-white opacity-70 shadow-md">
+        <div className="flex min-h-[76px] w-full items-center justify-center gap-3 rounded-3xl border border-[#E9D78F] bg-[#F8E8B2] px-5 text-2xl font-black text-[#6B5A2A] shadow-[0_10px_24px_rgba(160,120,30,0.12)]">
           <Sparkles className="h-8 w-8 animate-spin" />
-          思考中...
+          正在整理...
         </div>
       )}
     </section>

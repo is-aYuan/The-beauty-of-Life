@@ -90,3 +90,17 @@ test('mobile recorder uses pointer events and does not end speech when recording
     assert.match(engineSource, /recordingStateRef\.current !== "recording"/);
     assert.match(engineSource, /return false/);
 });
+
+test('mobile recorder uses the warm gold recording button palette', () => {
+    const recorderSource = fs.readFileSync(recorderPath, 'utf8');
+    const guidancePath = path.join(repoRoot, 'lovable_ui', 'src', 'lib', 'entryGuidance.js');
+    const guidanceSource = fs.readFileSync(guidancePath, 'utf8');
+
+    assert.match(recorderSource, /bg-\[#FFEA92\]/);
+    assert.match(recorderSource, /text-\[#241F1C\]/);
+    assert.match(recorderSource, /border-\[#F5D76B\]/);
+    assert.match(recorderSource, /shadow-\[0_10px_24px_rgba\(160,120,30,0\.18\)\]/);
+    assert.match(recorderSource, /bg-\[#241F1C\]/);
+    assert.doesNotMatch(recorderSource, /bg-red-600/);
+    assert.doesNotMatch(guidanceSource, /红色按钮/);
+});

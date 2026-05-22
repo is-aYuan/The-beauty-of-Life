@@ -56,7 +56,7 @@ export function buildEntryGuidance(input) {
   return {
     firstTimeUser,
     storyPrompt,
-    idleStatus: firstTimeUser ? '按住红色按钮，说一段回忆' : '按住话筒，接着上次的话题继续讲',
+    idleStatus: firstTimeUser ? '按住话筒，像聊天一样讲' : '按住话筒，接着上次的话题继续讲',
     speechText: serverGuidance?.speechText || '',
     shouldAutoSpeak: Boolean(serverGuidance?.shouldAutoSpeak),
     topicId: serverGuidance?.topicId || '',
