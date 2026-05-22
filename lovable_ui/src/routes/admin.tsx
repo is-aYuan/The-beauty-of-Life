@@ -60,6 +60,11 @@ type TabId = (typeof TABS)[number]["id"];
 
 const API_BASE = getRuntimeConfig(import.meta.env).apiBase;
 
+// 模块：管理员登录态存储。SSR 阶段没有浏览器 localStorage，只在客户端读取已有 token。
+function getStoredAdminToken() {
+  return typeof localStorage !== "undefined" ? localStorage.getItem("admin_token") || "" : "";
+}
+
 function formatTime(isoStr?: string) {
   if (!isoStr) return "";
   const d = new Date(isoStr);
@@ -73,7 +78,7 @@ function formatTime(isoStr?: string) {
 }
 
 function AdminPage() {
-  const [token, setToken] = useState(() => localStorage.getItem("admin_token") || "");
+  const [token, setToken] = useState(getStoredAdminToken);
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
