@@ -98,29 +98,45 @@ export function MobileTopicDrawer({
                     key={topic.id}
                     type="button"
                     onClick={() => onSelectTopic(topic.id)}
-                    className={`rounded-2xl p-3 text-left shadow-sm transition-transform active:scale-[0.98] ${
+                    className={`rounded-2xl border p-3 text-left transition-transform active:scale-[0.98] ${
                       active
-                        ? "bg-amber-300 text-stone-950 ring-2 ring-amber-700/30"
-                        : "bg-white text-stone-800 ring-1 ring-amber-100"
+                        ? "border-[#F5D76B] bg-[#FFEA92] text-[#241F1C] shadow-[0_10px_24px_rgba(160,120,30,0.18)]"
+                        : "border-amber-100 bg-white text-stone-800 shadow-sm"
                     }`}
                   >
                     <span className="block min-h-10 text-base font-black leading-snug">
                       {topic.title}
                     </span>
                     <span className="mt-2 flex items-center gap-2">
-                      <span className="h-2 flex-1 overflow-hidden rounded-full bg-stone-200">
+                      <span
+                        className={`h-2 flex-1 overflow-hidden rounded-full ${
+                          active ? "bg-[rgba(36,31,28,0.12)]" : "bg-stone-200"
+                        }`}
+                      >
                         <span
                           className={`block h-full rounded-full ${
-                            progress >= 85 ? "bg-emerald-500" : "bg-amber-700"
+                            active
+                              ? "bg-[#241F1C]"
+                              : progress >= 85
+                                ? "bg-emerald-500"
+                                : "bg-amber-700"
                           }`}
                           style={{ width: `${progress}%` }}
                         />
                       </span>
-                      <span className="w-9 text-right text-xs font-black text-stone-700">
+                      <span
+                        className={`w-9 text-right text-xs font-black ${
+                          active ? "text-[#241F1C]" : "text-stone-700"
+                        }`}
+                      >
                         {progress}%
                       </span>
                     </span>
-                    <span className="mt-1 block text-xs font-bold text-stone-500">
+                    <span
+                      className={`mt-1 block text-xs font-bold ${
+                        active ? "text-[#5F4A00]" : "text-stone-500"
+                      }`}
+                    >
                       {statusLabel}
                     </span>
                   </button>
@@ -135,7 +151,7 @@ export function MobileTopicDrawer({
             <button
               type="button"
               onClick={onCollapse}
-              className="min-h-12 w-full rounded-2xl bg-white text-base font-black text-stone-800 shadow-sm ring-1 ring-amber-100 active:scale-[0.98]"
+              className="min-h-12 w-full rounded-2xl border border-[#F5D76B] bg-[#FFEA92] text-base font-black text-[#241F1C] shadow-[0_10px_24px_rgba(160,120,30,0.18)] active:scale-[0.98]"
             >
               收起
             </button>

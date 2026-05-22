@@ -104,3 +104,14 @@ test('mobile recorder uses the warm gold recording button palette', () => {
     assert.doesNotMatch(recorderSource, /bg-red-600/);
     assert.doesNotMatch(guidanceSource, /红色按钮/);
 });
+
+test('mobile topic selection uses the same warm gold palette as recording controls', () => {
+    const topicSource = fs.readFileSync(topicDrawerPath, 'utf8');
+
+    assert.match(topicSource, /bg-\[#FFEA92\]/);
+    assert.match(topicSource, /text-\[#241F1C\]/);
+    assert.match(topicSource, /border-\[#F5D76B\]/);
+    assert.match(topicSource, /shadow-\[0_10px_24px_rgba\(160,120,30,0\.18\)\]/);
+    assert.match(topicSource, /data-mobile-topic-collapse[\s\S]*bg-\[#FFEA92\]/);
+    assert.doesNotMatch(topicSource, /bg-amber-300/);
+});
