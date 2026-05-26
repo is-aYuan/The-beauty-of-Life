@@ -67,3 +67,42 @@ test('keeps safe concrete memory questions unchanged', () => {
     assert.equal(result.reason, '');
     assert.equal(result.question, '您小时候最常在哪里玩？');
 });
+
+test('removes non-spoken stage directions from AI replies before display and TTS', () => {
+    const result = normalizeQuestionForElder({
+        question: '那您是想到了什么吗？（温和地笑着，眼神中充满鼓励）可以慢慢说给我听哦。',
+        topicTitle: '我的父母和家',
+        currentTopicId: 'parents_home',
+    });
+
+    assert.equal(result.changed, true);
+    assert.equal(result.reason, 'stage_direction');
+    assert.equal(result.question, '那您是想到了什么吗？可以慢慢说给我听哦。');
+    assert.doesNotMatch(result.question, /温和|笑着|眼神|鼓励|（|）/);
+});
+
+test('removes bracketed action descriptions without deleting normal speech', () => {
+    const result = normalizeQuestionForElder({
+        question: '我明白了。【轻轻点头】那您后来还记得哪些细节？',
+        topicTitle: '我的父母和家',
+        currentTopicId: 'parents_home',
+    });
+
+    assert.equal(result.changed, true);
+    assert.equal(result.reason, 'stage_direction');
+    assert.equal(result.question, '我明白了。那您后来还记得哪些细节？');
+    assert.doesNotMatch(result.question, /点头|【|】/);
+});
+
+test('falls back when an AI reply only contains a stage direction', () => {
+    const result = normalizeQuestionForElder({
+        question: '（温和地笑着）',
+        topicTitle: '我的父母和家',
+        currentTopicId: 'parents_home',
+    });
+
+    assert.equal(result.changed, true);
+    assert.equal(result.reason, 'stage_direction');
+    assert.equal(result.question, '小时候家里最让您有印象的一件小事是什么？');
+    assert.doesNotMatch(result.question, /温和|笑着|（|）/);
+});

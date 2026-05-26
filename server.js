@@ -59,6 +59,9 @@ const {
     buildSessionEntryGuidance,
 } = require('./lib/sessionEntryGuidance');
 const {
+    buildAnsweredEntryGuidanceTurn,
+} = require('./lib/entryGuidanceTurn');
+const {
     normalizeQuestionForElder,
 } = require('./lib/questionSafety');
 const {
@@ -88,6 +91,9 @@ const {
 const {
     createVoiceProvider,
 } = require('./lib/voice');
+const {
+    recognizeLongFormSpeech,
+} = require('./lib/voice/longFormRecognition');
 const {
     getClientIp,
     recordUserConsent,
@@ -119,7 +125,7 @@ const PORT = 8000;
 const SECRET_ID = PROVIDER_CONFIG.tencent.secretId;
 const SECRET_KEY = PROVIDER_CONFIG.tencent.secretKey;
 const REGION = PROVIDER_CONFIG.tencent.region;
-const AI_SYSTEM_PROMPT = process.env.AI_SYSTEM_PROMPT || '你是故事坊的AI助手，专门帮助老年人记录家庭故事和记忆。请用温暖、耐心、简洁的语气回复，每次回复不超过100字。鼓励老人继续讲述，适当提问引导。';
+const AI_SYSTEM_PROMPT = process.env.AI_SYSTEM_PROMPT || '你是故事坊的AI助手，专门帮助老年人记录家庭故事和记忆。请用温暖、耐心、简洁的语气回复，每次回复不超过100字。鼓励老人继续讲述，适当提问引导。只输出老人能直接听到的话，严禁输出括号旁白、动作描写、神态描写、心理描写或舞台说明，例如“（温和地笑着）”“【点头】”。';
 const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || SECRET_KEY || 'story-workshop-dev-secret';
 
 const AUDIO_ROOT = path.join(__dirname, 'data', 'records');
@@ -2050,7 +2056,9 @@ wss.on('connection', async (ws) => {
         userId: null,
         currentTopicId: DEFAULT_TOPIC_ID,
         audioChunks: [],
+        currentVoiceTurn: null,
         conversationHistory: [],
+        pendingEntryGuidance: null,
         pendingRecommendationQuestion: null,
         userPreferences: { ...DEFAULT_USER_PREFERENCES },
         isProcessing: false,
@@ -2068,6 +2076,9 @@ wss.on('connection', async (ws) => {
 
         if (isBinary) {
             session.audioChunks.push(data);
+            if (session.currentVoiceTurn) {
+                session.currentVoiceTurn.audioBytes += data.length;
+            }
         } else {
             try {
                 const msg = JSON.parse(data.toString());
@@ -2093,6 +2104,28 @@ wss.on('connection', async (ws) => {
 
 async function handleMessage(sessionId, session, msg) {
     console.log(`[${sessionId}] 收到指令:`, msg.event || msg.type);
+
+    // 语音轮次开始：清空上一轮残留音频，给本轮识别建立稳定边界。
+    if (msg.event === 'user_speech_started') {
+        if (!session.userId) {
+            sendJson(session.ws, { status: 'need_login', text: '请先登录' });
+            return;
+        }
+
+        const mode = msg.mode === 'table' ? 'table' : 'hold';
+        const turnId = typeof msg.turnId === 'string' && msg.turnId
+            ? msg.turnId
+            : `${sessionId}_${Date.now().toString(36)}`;
+
+        session.audioChunks = [];
+        session.currentVoiceTurn = {
+            turnId,
+            mode,
+            startedAt: Date.now(),
+            audioBytes: 0,
+        };
+        return;
+    }
 
     // 处理登录
     if (msg.type === 'login') {
@@ -2137,6 +2170,7 @@ async function handleMessage(sessionId, session, msg) {
             const entry = await buildEntryGuidanceForUser(result.userId, result.name, topicProfile);
             topicProfile = entry.topicProfile;
             session.currentTopicId = topicProfile.currentTopicId;
+            session.pendingEntryGuidance = entry.entryGuidance;
             const hasBiography = await checkHasBiography(result.userId);
 
             sendJson(session.ws, {
@@ -2176,6 +2210,7 @@ async function handleMessage(sessionId, session, msg) {
             const entry = await buildEntryGuidanceForUser(result.userId, name, topicProfile);
             topicProfile = entry.topicProfile;
             session.currentTopicId = topicProfile.currentTopicId;
+            session.pendingEntryGuidance = entry.entryGuidance;
             sendJson(session.ws, {
                 status: 'ready',
                 text: entry.entryGuidance.displayText,
@@ -2285,22 +2320,46 @@ async function handleMessage(sessionId, session, msg) {
             return;
         }
 
+        const voiceTurn = session.currentVoiceTurn;
+        if (msg.turnId && voiceTurn?.turnId && msg.turnId !== voiceTurn.turnId) {
+            console.log(`[${sessionId}] 收到旧语音轮次 ${msg.turnId}，当前轮次 ${voiceTurn.turnId}，已忽略`);
+            return;
+        }
+
+        const turnMeta = {
+            turnId: msg.turnId || voiceTurn?.turnId || null,
+            mode: msg.mode || voiceTurn?.mode || 'hold',
+        };
+
         const audioBuffer = Buffer.concat(session.audioChunks);
         session.audioChunks = [];
+        session.currentVoiceTurn = null;
 
         if (audioBuffer.length < 1000) {
             console.log(`[${sessionId}] 音频数据太短，忽略`);
+            sendJson(session.ws, {
+                event: 'user_transcript_failed',
+                turnId: turnMeta.turnId,
+                mode: turnMeta.mode,
+                text: '没有听清，请再说一次。',
+            });
             sendJson(session.ws, { status: 'ready', text: '没有听清，请再说一次。' });
             return;
         }
 
-        console.log(`[${sessionId}] 收到音频 ${(audioBuffer.length / 1024).toFixed(1)} KB`);
+        console.log(`[${sessionId}] 收到音频 ${(audioBuffer.length / 1024).toFixed(1)} KB，约 ${(audioBuffer.length / 32000).toFixed(1)} 秒`);
 
         session.isProcessing = true;
         try {
-            await processVoiceInteraction(sessionId, session, audioBuffer);
+            await processVoiceInteraction(sessionId, session, audioBuffer, turnMeta);
         } catch (err) {
             console.error(`[${sessionId}] 处理失败:`, err);
+            sendJson(session.ws, {
+                event: 'user_transcript_failed',
+                turnId: turnMeta.turnId,
+                mode: turnMeta.mode,
+                text: '抱歉，处理出错了，请再试一次。',
+            });
             sendJson(session.ws, {
                 status: 'ready',
                 text: '抱歉，处理出错了，请再试一次。',
@@ -2311,31 +2370,51 @@ async function handleMessage(sessionId, session, msg) {
     }
 }
 
-async function processVoiceInteraction(sessionId, session, audioBuffer) {
+async function processVoiceInteraction(sessionId, session, audioBuffer, turnMeta = {}) {
     const userId = session.userId;
 
     // ── Step 1: 语音识别 (ASR) ──
     sendJson(session.ws, { status: 'ai_thinking' });
     console.log(`[${sessionId}] Step 1: 语音识别中...`);
 
-    const userText = await recognizeSpeech(audioBuffer);
+    const userText = await recognizeLongFormSpeech(audioBuffer, async (chunk, chunkMeta) => {
+        if (chunkMeta.total > 1) {
+            console.log(`[${sessionId}] 长语音分段识别 ${chunkMeta.index + 1}/${chunkMeta.total}，${(chunk.length / 1024).toFixed(1)} KB`);
+        }
+        return recognizeSpeech(chunk);
+    });
     if (!userText) {
+        sendJson(session.ws, {
+            event: 'user_transcript_failed',
+            turnId: turnMeta.turnId,
+            mode: turnMeta.mode,
+            text: '没有听清，请再说一次。',
+        });
         sendJson(session.ws, { status: 'ready', text: '没有听清，请再说一次。' });
         return;
     }
     console.log(`[${sessionId}] 识别结果: "${userText}"`);
+    sendJson(session.ws, {
+        event: 'user_transcript',
+        turnId: turnMeta.turnId,
+        mode: turnMeta.mode,
+        text: userText,
+    });
 
     const audioFile = saveAudioLocally(userId, sessionId, audioBuffer);
+    const answeredEntryGuidance = buildAnsweredEntryGuidanceTurn(session.pendingEntryGuidance);
+    const promptSource = answeredEntryGuidance?.promptSource || null;
 
     // ── Step 2: 大模型对话 (混元) ──
     console.log(`[${sessionId}] Step 2: AI 对话中...`);
-    const aiReply = await chatWithAI(sessionId, session, userText);
+    const aiReply = await chatWithAI(sessionId, session, userText, { answeredEntryGuidance });
     console.log(`[${sessionId}] AI 回复: "${aiReply}"`);
 
     const topicProfile = await getOrCreateTopicProfile(userId);
     const selectedTopic = getSelectedTopic(topicProfile, session.currentTopicId);
 
     await saveConversation(sessionId, userId, {
+        ...(answeredEntryGuidance || {}),
         userText,
         aiReply,
         audioFile,
@@ -2344,6 +2423,9 @@ async function processVoiceInteraction(sessionId, session, audioBuffer) {
         topicTitle: selectedTopic?.title || '',
         topicProgress: selectedTopic?.progress || 0,
     });
+    if (promptSource === 'entry_guidance') {
+        session.pendingEntryGuidance = null;
+    }
 
     analyzeTopicProgressFromTurn(sessionId, session, userText, aiReply).catch(err => {
         console.error(`[主题分析] 本轮分析失败:`, err.message);
@@ -2384,6 +2466,7 @@ async function startRecommendationQuestion(sessionId, session, msg) {
     record.aiReply = safeQuestion.question;
 
     await saveConversation(sessionId, userId, record);
+    session.pendingEntryGuidance = null;
 
     session.pendingRecommendationQuestion = {
         topicId: record.topicId,
@@ -2428,8 +2511,14 @@ async function recognizeSpeech(audioBuffer) {
     }
 }
 
-async function chatWithAI(sessionId, session, userText) {
+async function chatWithAI(sessionId, session, userText, options = {}) {
     try {
+        if (options.answeredEntryGuidance?.aiPromptText) {
+            session.conversationHistory.push({
+                Role: 'assistant',
+                Content: options.answeredEntryGuidance.aiPromptText,
+            });
+        }
         session.conversationHistory.push({ Role: 'user', Content: userText });
 
         if (session.conversationHistory.length > 40) {

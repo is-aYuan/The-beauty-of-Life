@@ -5,10 +5,8 @@ import {
   Bot,
   Heart,
   Settings as SettingsIcon,
-  Pause,
   Square,
   Sparkles,
-  User,
   BookOpen,
   X,
   Volume2,
@@ -20,6 +18,7 @@ import {
   getLatestBiography,
 } from "../lib/biographyGeneration.js";
 import { buildEntryGuidance } from "../lib/entryGuidance.js";
+import { buildCurrentAiPrompt } from "../lib/currentAiPrompt.js";
 import {
   BIOGRAPHY_STYLE_OPTIONS,
   DEFAULT_BIOGRAPHY_STYLE_ID,
@@ -30,6 +29,7 @@ import { useStoryEngine } from "../hooks/useStoryEngine";
 import { useIsMobile } from "../hooks/use-mobile";
 import { FamilyConnectionPanel } from "../components/FamilyConnectionPanel";
 import { MobileAppShell } from "../components/mobile/MobileAppShell";
+import { ChatMessageBubble } from "../components/story/ChatMessageBubble";
 import {
   FONT_SCALE_PRESETS,
   FONT_SCALE_RANGE,
@@ -376,10 +376,13 @@ function Index() {
     subtitle,
     serverEntryGuidance,
   });
-  const shouldShowEntryPrompt =
-    Boolean(entryGuidance.storyPrompt) &&
-    convoState !== "userRecording" &&
-    (convoState !== "aiTalking" || chatHistory.length === 0);
+  // 模块：当前 AI 追问提示。蓝色区保留入口引导能力，但会话开始后始终显示最近一条 AI 消息。
+  const currentAiPrompt = buildCurrentAiPrompt({
+    chatHistory,
+    entryPrompt: entryGuidance.storyPrompt,
+    convoState,
+  });
+  const shouldShowCurrentAiPrompt = currentAiPrompt.shouldShow;
 
   const getTopicStatusLabel = (status: string, progress: number) => {
     if (status === "rich" || progress >= 85) return "素材已丰富";
@@ -551,32 +554,14 @@ function Index() {
         </header>
 
         <div ref={chatScrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-          {chatHistory.map((m) =>
-            m.role === "ai" ? (
-              <div key={m.id} className="flex items-start gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-stone-200 shadow-sm">
-                  <Bot className="h-5 w-5 text-stone-700" />
-                </div>
-                <div className="max-w-[88%] rounded-2xl rounded-tl-none bg-white p-4 shadow-sm">
-                  <p className="text-lg leading-relaxed text-stone-800">{m.text}</p>
-                </div>
-              </div>
-            ) : (
-              <div key={m.id} className="flex items-start justify-end gap-3">
-                <div className="max-w-[88%] rounded-2xl rounded-tr-none bg-amber-100 p-4 shadow-sm">
-                  <p className="text-lg leading-relaxed text-stone-800">{m.text}</p>
-                </div>
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-stone-700 shadow-sm">
-                  <User className="h-5 w-5 text-amber-50" />
-                </div>
-              </div>
-            ),
-          )}
+          {chatHistory.map((m) => (
+            <ChatMessageBubble key={m.id} message={m} density="mobile" />
+          ))}
 
-          {shouldShowEntryPrompt && (
+          {shouldShowCurrentAiPrompt && (
             <div className="border-t border-amber-200/60 pt-3">
               <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
-                <p className="text-lg leading-relaxed text-blue-800">{entryGuidance.storyPrompt}</p>
+                <p className="text-lg leading-relaxed text-blue-800">{currentAiPrompt.text}</p>
               </div>
             </div>
           )}
@@ -851,35 +836,15 @@ function Index() {
 
             {/* Scrollable chat log */}
             <div ref={chatScrollRef} className="flex-1 space-y-6 overflow-y-auto p-6">
-              {chatHistory.map((m) =>
-                m.role === "ai" ? (
-                  <div key={m.id} className="flex items-start gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-stone-200 shadow-sm">
-                      <Bot className="h-7 w-7 text-stone-700" />
-                    </div>
-                    <div className="max-w-[78%] rounded-3xl rounded-tl-none bg-white p-5 shadow-md">
-                      <p className="text-2xl leading-relaxed text-stone-800">{m.text}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div key={m.id} className="flex items-start justify-end gap-4">
-                    <div className="max-w-[78%] rounded-3xl rounded-tr-none bg-amber-100 p-5 shadow-md">
-                      <p className="text-2xl leading-relaxed text-stone-800">{m.text}</p>
-                    </div>
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-stone-700 shadow-sm">
-                      <User className="h-7 w-7 text-amber-50" />
-                    </div>
-                  </div>
-                ),
-              )}
+              {chatHistory.map((m) => (
+                <ChatMessageBubble key={m.id} message={m} density="desktop" />
+              ))}
 
               {/* Subtitle from stream */}
-              {shouldShowEntryPrompt && (
+              {shouldShowCurrentAiPrompt && (
                 <div className="flex items-start gap-4 pt-4 border-t border-amber-200/50">
                   <div className="max-w-[100%] bg-blue-50/50 p-4 rounded-xl border border-blue-100/50">
-                    <p className="text-2xl leading-relaxed text-blue-800">
-                      {entryGuidance.storyPrompt}
-                    </p>
+                    <p className="text-2xl leading-relaxed text-blue-800">{currentAiPrompt.text}</p>
                   </div>
                 </div>
               )}

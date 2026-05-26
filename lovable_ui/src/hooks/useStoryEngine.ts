@@ -15,6 +15,14 @@ import {
   type UserPreferences,
 } from "../lib/userPreferences.js";
 import { getRuntimeConfig } from "../lib/runtimeConfig.js";
+import { upsertSessionEntryMessage } from "../lib/sessionEntryMessage.js";
+import {
+  createVoiceDraftMessage,
+  failVoiceTranscript,
+  finalizeVoiceTranscript,
+  type VoiceMessageMode,
+  type VoiceMessageStatus,
+} from "../lib/voiceTranscript.js";
 
 const runtimeConfig = getRuntimeConfig(import.meta.env);
 
@@ -23,8 +31,9 @@ const CONFIG = {
   WS_URL: runtimeConfig.wsUrl,
   RECONNECT: { BASE_DELAY: 1000, MAX_DELAY: 30000, MULTIPLIER: 2 },
   AUDIO: { TARGET_SAMPLE_RATE: 16000, BUFFER_SIZE: 4096 },
-  VAD: { SILENCE_THRESHOLD_DB: -35, SILENCE_DURATION_MS: 4000, FFT_SIZE: 2048, SMOOTHING: 0.8 },
+  VAD: { FFT_SIZE: 2048, SMOOTHING: 0.8 },
   MAX_RECORDING_DURATION_S: 180,
+  TABLE_MODE_ENDS_ON_EXPLICIT_FINISH: true,
 };
 
 // Global audio context and instances to prevent issues during fast re-renders
@@ -39,7 +48,16 @@ export type User = {
   authToken?: string;
 };
 export type ConvoState = "idle" | "userRecording" | "aiThinking" | "aiTalking";
-export type ChatMessage = { id: number; role: "ai" | "user"; text: string };
+export type ChatMessage = {
+  id: number;
+  role: "ai" | "user";
+  text: string;
+  status?: VoiceMessageStatus;
+  turnId?: string;
+  mode?: VoiceMessageMode;
+  source?: "entry_guidance";
+  entryGuidanceId?: string;
+};
 export type LegalConsentInput = {
   acceptedLegalTerms: boolean;
   acceptedPersonalInfoProcessing: boolean;
@@ -90,10 +108,9 @@ export function useStoryEngine() {
   const vadAnimationFrameRef = useRef<number | null>(null);
 
   const recordingStateRef = useRef<"idle" | "recording">("idle");
-  const isSilentRef = useRef(false);
-  const silenceStartTimeRef = useRef(0);
   const recordingStartTimeRef = useRef(0);
   const explicitStopCallbackRef = useRef<(() => void) | null>(null);
+  const activeVoiceTurnRef = useRef<{ turnId: string; mode: VoiceMessageMode } | null>(null);
 
   // Playback Refs
   const playbackQueueRef = useRef<AudioBuffer[]>([]);
@@ -353,6 +370,10 @@ export function useStoryEngine() {
     audioUnlocked = true;
   }, [initAudioContext]);
 
+  // 模块：语音轮次协议。每次录音都有独立 turnId，避免长录音和旧 WebSocket 音频串线。
+  const createVoiceTurnId = () =>
+    `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
   // 模块：WebSocket 生命周期管理。区分主动关闭和异常掉线，避免清理旧连接时触发重连循环。
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -475,7 +496,15 @@ export function useStoryEngine() {
         setConvoState("idle");
         setSubtitle(msg.text || "");
         if (msg.hasBiography !== undefined) setHasBiography(msg.hasBiography);
-        if (msg.entryGuidance) setServerEntryGuidance(msg.entryGuidance);
+        if (msg.entryGuidance) {
+          setServerEntryGuidance(msg.entryGuidance);
+          setChatHistory(
+            (prev) =>
+              upsertSessionEntryMessage(prev, {
+                entryGuidance: msg.entryGuidance,
+              }) as ChatMessage[],
+          );
+        }
         if (msg.preferences) {
           const preferences = saveLocalUserPreferences(localStorage, msg.preferences);
           setUserPreferences(preferences);
@@ -493,6 +522,28 @@ export function useStoryEngine() {
       if (msg.event === "preferences_updated" && msg.preferences) {
         const preferences = saveLocalUserPreferences(localStorage, msg.preferences);
         setUserPreferences(preferences);
+      }
+      if (msg.event === "user_transcript") {
+        setChatHistory(
+          (prev) =>
+            finalizeVoiceTranscript(prev, {
+              turnId: msg.turnId,
+              text: msg.text,
+              mode: msg.mode,
+            }) as ChatMessage[],
+        );
+        return;
+      }
+      if (msg.event === "user_transcript_failed") {
+        const message = msg.text || "没有听清，请再说一次。";
+        setChatHistory((prev) =>
+          failVoiceTranscript(prev, {
+            turnId: msg.turnId,
+            message,
+          }),
+        );
+        setRecorderError(message);
+        return;
       }
       if (msg.status === "ai_thinking") setConvoState("aiThinking");
       if (msg.status === "ai_speaking") setConvoState("aiTalking");
@@ -577,7 +628,13 @@ export function useStoryEngine() {
   };
 
   // Recording logic
-  const startRecordingCore = async (onStop?: () => void) => {
+  const startRecordingCore = async ({
+    mode,
+    onStop,
+  }: {
+    mode: VoiceMessageMode;
+    onStop?: () => void;
+  }) => {
     if (recordingStateRef.current === "recording") return false;
 
     setRecorderError("");
@@ -641,9 +698,31 @@ export function useStoryEngine() {
 
     recordingStateRef.current = "recording";
     recordingStartTimeRef.current = Date.now();
-    isSilentRef.current = false;
     explicitStopCallbackRef.current = onStop || null;
 
+    const voiceTurn = {
+      turnId: createVoiceTurnId(),
+      mode,
+    };
+    activeVoiceTurnRef.current = voiceTurn;
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          event: "user_speech_started",
+          turnId: voiceTurn.turnId,
+          mode: voiceTurn.mode,
+        }),
+      );
+    }
+
+    setChatHistory((prev) => [
+      ...prev,
+      createVoiceDraftMessage({
+        turnId: voiceTurn.turnId,
+        mode: voiceTurn.mode,
+      }),
+    ]);
     setConvoState("userRecording");
     return true;
   };
@@ -678,8 +757,17 @@ export function useStoryEngine() {
       vadAnimationFrameRef.current = null;
     }
 
+    const voiceTurn = activeVoiceTurnRef.current;
+    activeVoiceTurnRef.current = null;
+
     if (sendEvent && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ event: "user_speech_ended" }));
+      wsRef.current.send(
+        JSON.stringify({
+          event: "user_speech_ended",
+          turnId: voiceTurn?.turnId,
+          mode: voiceTurn?.mode,
+        }),
+      );
     }
 
     if (explicitStopCallbackRef.current) {
@@ -690,47 +778,22 @@ export function useStoryEngine() {
     return true;
   }, []);
 
-  // VAD Loop (For Auto Mode and Visualizer)
+  // 模块：录音可视化循环。桌上畅聊只由“讲完了”结束，循环不再用静音截断用户。
   const startVADLoop = useCallback(() => {
     if (!analyserNodeRef.current) return;
     const analyser = analyserNodeRef.current;
 
-    const bufferLength = analyser.fftSize;
-    const dataArray = new Uint8Array(bufferLength);
     const freqData = new Uint8Array(analyser.frequencyBinCount);
 
     const analyze = () => {
       if (recordingStateRef.current !== "recording") return;
 
-      analyser.getByteTimeDomainData(dataArray);
       analyser.getByteFrequencyData(freqData);
       setFrequencyData(new Uint8Array(freqData));
 
-      let sumSquares = 0;
-      for (let i = 0; i < bufferLength; i++) {
-        const offset = dataArray[i] - 128;
-        sumSquares += offset * offset;
-      }
-      const rms = Math.sqrt(sumSquares / bufferLength);
-      const dB = rms === 0 ? -100 : 20 * Math.log10(rms / 128);
-
       const now = Date.now();
-      if (dB < CONFIG.VAD.SILENCE_THRESHOLD_DB) {
-        if (!isSilentRef.current) {
-          isSilentRef.current = true;
-          silenceStartTimeRef.current = now;
-        }
-        if (now - silenceStartTimeRef.current >= CONFIG.VAD.SILENCE_DURATION_MS) {
-          stopRecording(true);
-          setConvoState("aiThinking"); // Provide immediate feedback
-          return;
-        }
-      } else {
-        isSilentRef.current = false;
-        silenceStartTimeRef.current = 0;
-      }
-
       if ((now - recordingStartTimeRef.current) / 1000 >= CONFIG.MAX_RECORDING_DURATION_S) {
+        setRecorderError("录音已到最长时间，正在整理前面内容。");
         stopRecording(true);
         setConvoState("aiThinking");
         return;
@@ -747,7 +810,10 @@ export function useStoryEngine() {
   const startManualRecord = async () => {
     unlockAudioContext();
     stopPlayback();
-    const started = await startRecordingCore(() => setConvoState("idle"));
+    const started = await startRecordingCore({
+      mode: "hold",
+      onStop: () => setConvoState("idle"),
+    });
     if (started) {
       if (!vadAnimationFrameRef.current) {
         // Start dummy loop just for visualizer
@@ -775,7 +841,9 @@ export function useStoryEngine() {
   const startAutoRecord = async () => {
     unlockAudioContext();
     stopPlayback();
-    const started = await startRecordingCore();
+    const started = await startRecordingCore({
+      mode: "table",
+    });
     if (started) {
       startVADLoop();
     }
