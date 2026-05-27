@@ -20,7 +20,6 @@ import {
   getLatestBiography,
 } from "../lib/biographyGeneration.js";
 import { buildEntryGuidance } from "../lib/entryGuidance.js";
-import { buildCurrentAiPrompt } from "../lib/currentAiPrompt.js";
 import {
   getTopicTransitionSecondaryAction,
   getTopicTransitionSecondaryLabel,
@@ -100,7 +99,7 @@ function MiniVisualizer({ freqData }: { freqData: Uint8Array | null }) {
   });
 
   return (
-    <div className="mt-2 flex h-8 items-end justify-center gap-1">
+    <div className="mt-1 flex h-6 items-end justify-center gap-1">
       {bars.map((h, i) => (
         <div
           key={i}
@@ -384,13 +383,9 @@ function Index() {
     subtitle,
     serverEntryGuidance,
   });
-  // 模块：当前 AI 追问提示。蓝色区保留入口引导能力，但会话开始后始终显示最近一条 AI 消息。
-  const currentAiPrompt = buildCurrentAiPrompt({
-    chatHistory,
-    entryPrompt: entryGuidance.storyPrompt,
-    convoState,
-  });
-  const shouldShowCurrentAiPrompt = currentAiPrompt.shouldShow;
+  // 模块：最新 AI 消息高亮。只标记聊天流里的最后一条 AI 气泡，避免底部重复展示一份提示文本。
+  const latestAiMessageId =
+    [...chatHistory].reverse().find((message) => message.role === "ai")?.id ?? null;
   const transitionSecondaryLabel = getTopicTransitionSecondaryLabel(pendingTopicTransition);
   const handleTopicTransitionSecondary = () => {
     if (!pendingTopicTransition) return;
@@ -400,7 +395,7 @@ function Index() {
   };
   // 模块：富主题换题控制。仅在后端判定当前主题足够丰富后出现，不改变原有语音主流程。
   const topicTransitionControls = pendingTopicTransition ? (
-    <div className="mx-auto mb-4 max-w-xl rounded-xl border border-amber-200 bg-white/85 p-3 shadow-sm">
+    <div className="mx-auto mb-3 max-w-xl rounded-xl border border-amber-200 bg-white/85 p-2 shadow-sm">
       <p className="text-base font-bold leading-relaxed text-stone-700">
         {pendingTopicTransition.text}
       </p>
@@ -408,7 +403,7 @@ function Index() {
         <button
           type="button"
           onClick={() => respondTopicTransition("continue")}
-          className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white px-3 text-base font-black text-stone-700 transition-colors hover:bg-stone-50 active:scale-[0.98]"
+          className="flex min-h-10 items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white px-3 text-base font-black text-stone-700 transition-colors hover:bg-stone-50 active:scale-[0.98]"
         >
           <RefreshCw className="h-5 w-5" />
           继续这个主题
@@ -416,7 +411,7 @@ function Index() {
         <button
           type="button"
           onClick={handleTopicTransitionSecondary}
-          className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-amber-400 px-3 text-base font-black text-stone-900 transition-colors hover:bg-amber-300 active:scale-[0.98]"
+          className="flex min-h-10 items-center justify-center gap-2 rounded-lg bg-amber-400 px-3 text-base font-black text-stone-900 transition-colors hover:bg-amber-300 active:scale-[0.98]"
         >
           {pendingTopicTransition.nextTopicId ? (
             <ArrowRight className="h-5 w-5" />
@@ -600,16 +595,13 @@ function Index() {
 
         <div ref={chatScrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           {chatHistory.map((m) => (
-            <ChatMessageBubble key={m.id} message={m} density="mobile" />
+            <ChatMessageBubble
+              key={m.id}
+              message={m}
+              density="mobile"
+              isLatestAi={m.id === latestAiMessageId}
+            />
           ))}
-
-          {shouldShowCurrentAiPrompt && (
-            <div className="border-t border-amber-200/60 pt-3">
-              <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
-                <p className="text-lg leading-relaxed text-blue-800">{currentAiPrompt.text}</p>
-              </div>
-            </div>
-          )}
 
           {convoState === "aiThinking" && (
             <div className="flex items-start gap-3">
@@ -883,17 +875,13 @@ function Index() {
             {/* Scrollable chat log */}
             <div ref={chatScrollRef} className="flex-1 space-y-6 overflow-y-auto p-6">
               {chatHistory.map((m) => (
-                <ChatMessageBubble key={m.id} message={m} density="desktop" />
+                <ChatMessageBubble
+                  key={m.id}
+                  message={m}
+                  density="desktop"
+                  isLatestAi={m.id === latestAiMessageId}
+                />
               ))}
-
-              {/* Subtitle from stream */}
-              {shouldShowCurrentAiPrompt && (
-                <div className="flex items-start gap-4 pt-4 border-t border-amber-200/50">
-                  <div className="max-w-[100%] bg-blue-50/50 p-4 rounded-xl border border-blue-100/50">
-                    <p className="text-2xl leading-relaxed text-blue-800">{currentAiPrompt.text}</p>
-                  </div>
-                </div>
-              )}
 
               {convoState === "aiThinking" && (
                 <div className="flex items-start gap-4">
@@ -911,11 +899,11 @@ function Index() {
             </div>
 
             {/* Sticky bottom control panel */}
-            <div className="sticky bottom-0 border-t-2 border-amber-200 bg-amber-50 p-4">
+            <div className="sticky bottom-0 border-t-2 border-amber-200 bg-amber-50 px-4 py-3">
               {topicTransitionControls}
 
               {/* Mode toggle */}
-              <div className="mx-auto mb-4 flex w-fit rounded-full bg-amber-100 p-1 text-stone-600">
+              <div className="mx-auto mb-2 flex w-fit rounded-full bg-amber-100 p-1 text-stone-600">
                 {(
                   [
                     { id: "hold", label: "按住说话" },
@@ -927,7 +915,7 @@ function Index() {
                     <button
                       key={opt.id}
                       onClick={() => setRecordMode(opt.id)}
-                      className={`rounded-full px-5 py-2 text-lg transition-all ${
+                      className={`rounded-full px-4 py-1.5 text-base transition-all ${
                         active
                           ? "bg-white font-bold text-stone-800 shadow-sm"
                           : "text-stone-600 hover:text-stone-800"
@@ -940,24 +928,26 @@ function Index() {
               </div>
 
               {/* Dynamic status area */}
-              <div className="mb-4 min-h-[68px] text-center">
+              <div className="mb-3 min-h-[34px] text-center">
                 {networkStatus === "offline" ? (
-                  <p className="animate-pulse text-xl font-medium text-amber-600">
+                  <p className="animate-pulse text-lg font-medium text-amber-600">
                     爷爷，网络打了个盹，正在努力重连...
                   </p>
                 ) : convoState === "userRecording" ? (
                   <>
-                    <p className="text-xl font-bold text-emerald-600">正在听您说...</p>
+                    <p className="text-lg font-bold text-emerald-600">正在听您说...</p>
                     <MiniVisualizer freqData={frequencyData} />
                   </>
                 ) : convoState === "aiThinking" ? (
-                  <p className="animate-pulse text-xl font-medium text-orange-500">
+                  <p className="animate-pulse text-lg font-medium text-orange-500">
                     AI 正在思考处理中...
                   </p>
                 ) : convoState === "aiTalking" ? (
-                  <p className="text-xl font-medium text-blue-600">AI 正在为您朗读回应...</p>
+                  <p className="text-lg font-medium text-blue-600">AI 正在为您朗读回应...</p>
                 ) : (
-                  <p className="text-xl font-medium text-stone-700">{entryGuidance.idleStatus}</p>
+                  <p className="line-clamp-1 text-lg font-medium text-stone-700">
+                    {entryGuidance.idleStatus}
+                  </p>
                 )}
               </div>
 
@@ -981,9 +971,9 @@ function Index() {
                       }
                     }}
                     onClick={() => recordMode === "table" && startAutoRecord()}
-                    className="flex items-center gap-3 rounded-2xl bg-red-600 px-10 py-6 text-2xl font-bold text-white shadow-md transition-transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100 cursor-pointer"
+                    className="flex min-h-[58px] items-center gap-2 rounded-xl border border-[#F5D76B] bg-[#FFEA92] px-7 py-0 text-xl font-bold text-[#241F1C] shadow-[0_8px_18px_rgba(160,120,30,0.16)] transition-transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:border-[#D8D0C0] disabled:bg-[#E8E1D3] disabled:text-[#8A8174] disabled:hover:scale-100 cursor-pointer"
                   >
-                    <Mic className="h-8 w-8" />
+                    <Mic className="h-6 w-6" />
                     {recordMode === "hold" ? "长按 开始讲述" : "点击 开始畅聊"}
                   </button>
                 </div>
@@ -993,9 +983,9 @@ function Index() {
                 <div className="flex justify-center">
                   <button
                     onClick={stopAutoRecord}
-                    className="flex items-center justify-center gap-3 rounded-2xl bg-stone-700 px-8 py-5 text-2xl font-bold text-amber-50 shadow-md transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                    className="flex min-h-[56px] items-center justify-center gap-2 rounded-xl bg-[#241F1C] px-6 py-0 text-xl font-bold text-[#FFF7D6] shadow-md transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                   >
-                    <Square className="h-8 w-8" />
+                    <Square className="h-6 w-6" />
                     讲完了
                   </button>
                 </div>
@@ -1010,9 +1000,9 @@ function Index() {
                       e.preventDefault();
                       stopManualRecord();
                     }}
-                    className="flex items-center justify-center gap-3 rounded-2xl bg-stone-800 px-8 py-5 text-2xl font-bold text-amber-50 shadow-md cursor-pointer animate-pulse"
+                    className="flex min-h-[58px] items-center justify-center gap-2 rounded-xl bg-[#241F1C] px-6 py-0 text-xl font-bold text-[#FFF7D6] shadow-md cursor-pointer animate-pulse"
                   >
-                    <Mic className="h-8 w-8 text-red-500" />
+                    <Mic className="h-6 w-6 text-[#FFF7D6]" />
                     录音中，松开发送...
                   </div>
                 </div>
@@ -1022,9 +1012,9 @@ function Index() {
                 <div className="flex justify-center">
                   <button
                     onClick={stopAll}
-                    className="flex items-center justify-center gap-3 rounded-2xl bg-stone-700 px-8 py-5 text-2xl font-bold text-amber-50 shadow-md transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                    className="flex min-h-[56px] items-center justify-center gap-2 rounded-xl bg-[#241F1C] px-6 py-0 text-xl font-bold text-[#FFF7D6] shadow-md transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                   >
-                    <Square className="h-8 w-8" />
+                    <Square className="h-6 w-6" />
                     停止播放
                   </button>
                 </div>
@@ -1032,8 +1022,8 @@ function Index() {
 
               {convoState === "aiThinking" && (
                 <div className="flex justify-center opacity-50 pointer-events-none">
-                  <div className="flex items-center gap-3 rounded-2xl bg-orange-600 px-10 py-6 text-2xl font-bold text-white shadow-md">
-                    <Sparkles className="h-8 w-8 animate-spin" />
+                  <div className="flex min-h-[58px] items-center gap-2 rounded-xl border border-[#E9D78F] bg-[#F8E8B2] px-7 py-0 text-xl font-bold text-[#6B5A2A] shadow-[0_8px_18px_rgba(160,120,30,0.1)]">
+                    <Sparkles className="h-6 w-6 animate-spin" />
                     思考中...
                   </div>
                 </div>
