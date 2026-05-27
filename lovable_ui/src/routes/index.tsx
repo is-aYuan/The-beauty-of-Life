@@ -35,6 +35,7 @@ import { useIsMobile } from "../hooks/use-mobile";
 import { FamilyConnectionPanel } from "../components/FamilyConnectionPanel";
 import { MobileAppShell } from "../components/mobile/MobileAppShell";
 import { ChatMessageBubble } from "../components/story/ChatMessageBubble";
+import { TextInputComposer } from "../components/story/TextInputComposer";
 import {
   FONT_SCALE_PRESETS,
   FONT_SCALE_RANGE,
@@ -51,7 +52,7 @@ export const Route = createFileRoute("/")({
 });
 
 type Tab = "story" | "organizer" | "family" | "settings";
-type RecordMode = "hold" | "table";
+type RecordMode = "hold" | "table" | "text";
 
 const NAV_ITEMS: { id: Tab; label: string; icon: typeof Mic }[] = [
   { id: "story", label: "讲我的故事", icon: Mic },
@@ -302,6 +303,7 @@ function Index() {
     wsConnected,
     networkStatus,
     convoState,
+    inputMode,
     subtitle,
     topicProfile,
     serverEntryGuidance,
@@ -318,6 +320,9 @@ function Index() {
     stopManualRecord,
     startAutoRecord,
     stopAutoRecord,
+    sendTextMessage,
+    enterTextInputMode,
+    enterVoiceInputMode,
     stopAll,
     selectTopic,
     respondTopicTransition,
@@ -364,6 +369,18 @@ function Index() {
 
   if (!hasLocalUser || !user) return null;
 
+  // 模块：输入方式切换。桌面和手机共用同一条切换逻辑，避免文本模式误触发录音/朗读。
+  const handleRecordModeChange = (mode: RecordMode) => {
+    setRecordMode(mode);
+    if (mode === "text") {
+      enterTextInputMode();
+    } else if (inputMode === "text") {
+      enterVoiceInputMode();
+    }
+  };
+
+  const memoirTitle = buildMemoirTitle(user.name);
+  const companionStatsText = `今日陪伴 · ${userStats.totalConversations} 段 · ${userStats.estimatedDurationMin} 分钟`;
   const currentTopic = topicProfile?.topics.find(
     (topic) => topic.id === topicProfile.currentTopicId,
   );
@@ -583,14 +600,9 @@ function Index() {
       </div>
     ) : (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <header className="shrink-0 border-b border-amber-200 px-4 py-4">
-          <h2 className="text-2xl font-black leading-tight text-stone-900">
-            {buildMemoirTitle(user.name)}
-          </h2>
-          <p className="mt-1 text-base font-semibold text-stone-600">今日陪伴</p>
-          <p className="mt-0.5 text-sm font-medium text-stone-500">
-            已记录 {userStats.totalConversations} 个对话，约 {userStats.estimatedDurationMin} 分钟
-          </p>
+        <header className="shrink-0 border-b border-amber-200 px-4 py-2.5">
+          <h2 className="text-xl font-black leading-tight text-stone-900">{memoirTitle}</h2>
+          <p className="mt-1 text-sm font-semibold text-stone-600">{companionStatsText}</p>
         </header>
 
         <div ref={chatScrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
@@ -690,11 +702,12 @@ function Index() {
           onLogout={logout}
           onTopicSelect={selectTopic}
           getTopicStatusLabel={getTopicStatusLabel}
-          onRecordModeChange={setRecordMode}
+          onRecordModeChange={handleRecordModeChange}
           onStartManualRecord={startManualRecord}
           onStopManualRecord={stopManualRecord}
           onStartAutoRecord={startAutoRecord}
           onStopAutoRecord={stopAutoRecord}
+          onSendTextMessage={sendTextMessage}
           onStopAll={stopAll}
         >
           {mobileMainContent}
@@ -863,13 +876,9 @@ function Index() {
           </div>
         ) : (
           <div className="flex flex-1 flex-col overflow-hidden">
-            <header className="border-b-2 border-amber-200 pb-5">
-              <h2 className="text-4xl font-bold text-stone-800">{buildMemoirTitle(user.name)}</h2>
-              <p className="mt-2 text-xl text-stone-600">今日陪伴</p>
-              <p className="mt-1 text-sm text-stone-500">
-                已记录 {userStats.totalConversations} 个对话，约 {userStats.estimatedDurationMin}{" "}
-                分钟
-              </p>
+            <header className="border-b-2 border-amber-200 pb-3">
+              <h2 className="text-3xl font-bold text-stone-800">{memoirTitle}</h2>
+              <p className="mt-1 text-base font-semibold text-stone-600">{companionStatsText}</p>
             </header>
 
             {/* Scrollable chat log */}
@@ -906,15 +915,16 @@ function Index() {
               <div className="mx-auto mb-2 flex w-fit rounded-full bg-amber-100 p-1 text-stone-600">
                 {(
                   [
-                    { id: "hold", label: "按住说话" },
-                    { id: "table", label: "放桌上畅聊" },
+                    { id: "hold", label: "长按说话" },
+                    { id: "table", label: "桌上畅聊" },
+                    { id: "text", label: "打字输入" },
                   ] as { id: RecordMode; label: string }[]
                 ).map((opt) => {
                   const active = recordMode === opt.id;
                   return (
                     <button
                       key={opt.id}
-                      onClick={() => setRecordMode(opt.id)}
+                      onClick={() => handleRecordModeChange(opt.id)}
                       className={`rounded-full px-4 py-1.5 text-base transition-all ${
                         active
                           ? "bg-white font-bold text-stone-800 shadow-sm"
@@ -946,13 +956,23 @@ function Index() {
                   <p className="text-lg font-medium text-blue-600">AI 正在为您朗读回应...</p>
                 ) : (
                   <p className="line-clamp-1 text-lg font-medium text-stone-700">
-                    {entryGuidance.idleStatus}
+                    {recordMode === "text"
+                      ? "打字输入，接着上次的话题继续讲"
+                      : entryGuidance.idleStatus}
                   </p>
                 )}
               </div>
 
               {/* Action buttons */}
-              {convoState === "idle" && (
+              {convoState === "idle" && recordMode === "text" && (
+                <TextInputComposer
+                  disabled={networkStatus === "offline"}
+                  onSend={sendTextMessage}
+                  placeholder="打字讲述您的故事"
+                />
+              )}
+
+              {convoState === "idle" && recordMode !== "text" && (
                 <div className="flex justify-center">
                   <button
                     disabled={networkStatus === "offline"}

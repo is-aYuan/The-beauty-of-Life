@@ -943,17 +943,42 @@ function mergeByKey(existing, incoming, key, mergeFn) {
 }
 
 /**
- * 获取用户统计数据
+ * 模块：用户统计读取。用 count 获取真实总数，分页读取仅用于累计音频大小，避免 CloudBase get 默认页大小造成 100 条上限。
  */
-async function getUserStats(userId) {
-    const sessions = await db.collection('sessions').where({ userId }).get();
-    const conversations = await db.collection('conversations').where({ userId }).get();
+async function fetchUserConversationAudioStats(userId) {
+    const batchSize = 100;
+    let offset = 0;
+    let totalAudioKB = 0;
 
-    const totalSessions = sessions.data.length;
-    const totalConversations = conversations.data.length;
+    while (true) {
+        const result = await db.collection('conversations')
+            .where({ userId })
+            .skip(offset)
+            .limit(batchSize)
+            .get();
+        const records = result.data || [];
+        if (records.length === 0) break;
+
+        totalAudioKB += records.reduce((sum, c) => sum + (c.audioSizeKB || 0), 0);
+        if (records.length < batchSize) break;
+        offset += batchSize;
+    }
+
+    return { totalAudioKB };
+}
+
+async function getUserStats(userId) {
+    const [sessions, conversations, audioStats] = await Promise.all([
+        db.collection('sessions').where({ userId }).count(),
+        db.collection('conversations').where({ userId }).count(),
+        fetchUserConversationAudioStats(userId),
+    ]);
+
+    const totalSessions = sessions.total || 0;
+    const totalConversations = conversations.total || 0;
 
     // 计算总音频时长（根据音频大小估算，16kHz 16bit = 32KB/s）
-    const totalAudioKB = conversations.data.reduce((sum, c) => sum + (c.audioSizeKB || 0), 0);
+    const totalAudioKB = audioStats.totalAudioKB;
     const estimatedDurationMin = Math.round(totalAudioKB / 32 / 60);
 
     return {
@@ -2043,6 +2068,7 @@ async function buildEntryGuidanceForUser(userId, userName, topicProfile) {
 // 模块：入口引导语音播放。欢迎/续聊朗读只发送音频，不写 conversation，避免污染回忆录素材。
 async function speakEntryGuidance(sessionId, session, entryGuidance) {
     if (!entryGuidance?.shouldAutoSpeak || !entryGuidance.speechText) return;
+    if (!shouldSpeakForSession(session)) return;
 
     const audioData = await synthesizeSpeech(entryGuidance.speechText, session.userPreferences);
     if (audioData && session.ws.readyState === 1) {
@@ -2073,6 +2099,7 @@ wss.on('connection', async (ws) => {
         topicTransitionPrompt: null,
         topicTransitionSuppressTurns: 0,
         richTopicPromptedTopicIds: new Set(),
+        inputMode: 'voice',
         userPreferences: { ...DEFAULT_USER_PREFERENCES },
         isProcessing: false,
     });
@@ -2130,6 +2157,7 @@ async function handleMessage(sessionId, session, msg) {
             ? msg.turnId
             : `${sessionId}_${Date.now().toString(36)}`;
 
+        session.inputMode = 'voice';
         session.audioChunks = [];
         session.currentVoiceTurn = {
             turnId,
@@ -2137,6 +2165,21 @@ async function handleMessage(sessionId, session, msg) {
             startedAt: Date.now(),
             audioBytes: 0,
         };
+        return;
+    }
+
+    // 输入模式切换：文本模式不需要麦克风，也不接收后续 TTS 音频。
+    if (msg.type === 'set_input_mode') {
+        session.inputMode = normalizeInputMode(msg.inputMode);
+        if (session.inputMode === 'text') {
+            session.audioChunks = [];
+            session.currentVoiceTurn = null;
+        }
+        sendJson(session.ws, {
+            event: 'input_mode_updated',
+            status: 'ready',
+            inputMode: session.inputMode,
+        });
         return;
     }
 
@@ -2331,6 +2374,47 @@ async function handleMessage(sessionId, session, msg) {
         return;
     }
 
+    // 文本输入：复用语音识别之后的同一条对话管线，但跳过 ASR/TTS。
+    if (msg.type === 'user_text_message') {
+        if (!session.userId) {
+            sendJson(session.ws, { status: 'need_login', text: '请先登录' });
+            return;
+        }
+
+        if (session.isProcessing) {
+            console.log(`[${sessionId}] 上一轮还在处理中，跳过文本输入`);
+            return;
+        }
+
+        const userText = normalizeTypedUserText(msg.text);
+        if (!userText) {
+            sendJson(session.ws, {
+                event: 'text_input_error',
+                status: 'ready',
+                text: '请先输入想说的话。',
+            });
+            return;
+        }
+
+        session.inputMode = 'text';
+        session.audioChunks = [];
+        session.currentVoiceTurn = null;
+        session.isProcessing = true;
+        try {
+            await processTypedInteraction(sessionId, session, userText);
+        } catch (err) {
+            console.error(`[${sessionId}] 文本处理失败:`, err);
+            sendJson(session.ws, {
+                event: 'text_input_error',
+                status: 'ready',
+                text: '抱歉，处理出错了，请再试一次。',
+            });
+        } finally {
+            session.isProcessing = false;
+        }
+        return;
+    }
+
     // 处理语音结束
     if (msg.event === 'user_speech_ended') {
         if (!session.userId) {
@@ -2406,6 +2490,20 @@ function decrementTopicTransitionSuppressTurns(session) {
     }
 }
 
+// 模块：输入模式。后端只关心“是否需要朗读”，具体 UI 由前端自行切换。
+function normalizeInputMode(value) {
+    return value === 'text' ? 'text' : 'voice';
+}
+
+function shouldSpeakForSession(session, inputMode = session.inputMode) {
+    return normalizeInputMode(inputMode) !== 'text';
+}
+
+function normalizeTypedUserText(value) {
+    if (typeof value !== 'string') return '';
+    return value.trim().slice(0, 2000);
+}
+
 // 模块：富主题换题提示。后端拥有主题进度和当前主题状态，因此在这里统一决定是否提示。
 async function maybePromptTopicTransition(sessionId, session, topicProfile) {
     if (!session.userId || !topicProfile) return false;
@@ -2420,13 +2518,16 @@ async function maybePromptTopicTransition(sessionId, session, topicProfile) {
     session.topicTransitionPrompt = prompt;
     session.richTopicPromptedTopicIds.add(prompt.currentTopicId);
     appendSessionHistory(session, { Role: 'assistant', Content: prompt.text });
+    const shouldSpeak = shouldSpeakForSession(session);
 
     sendJson(session.ws, {
         event: 'topic_transition_prompt',
-        status: 'ai_speaking',
+        status: shouldSpeak ? 'ai_speaking' : 'ready',
         text: prompt.text,
         transition: prompt,
     });
+
+    if (!shouldSpeak) return true;
 
     const audioData = await synthesizeSpeech(prompt.text, session.userPreferences);
     if (audioData) {
@@ -2442,12 +2543,15 @@ async function speakTopicSwitchOpening(sessionId, session, opening) {
     if (!opening?.text) return false;
 
     session.pendingTopicOpening = opening;
+    const shouldSpeak = shouldSpeakForSession(session);
     sendJson(session.ws, {
         event: 'topic_switch_opening',
-        status: 'ai_speaking',
+        status: shouldSpeak ? 'ai_speaking' : 'ready',
         text: opening.text,
         opening,
     });
+
+    if (!shouldSpeak) return true;
 
     const audioData = await synthesizeSpeech(opening.text, session.userPreferences);
     if (audioData) {
@@ -2576,6 +2680,37 @@ async function processVoiceInteraction(sessionId, session, audioBuffer, turnMeta
         text: userText,
     });
 
+    const audioFile = saveAudioLocally(userId, sessionId, audioBuffer);
+    await processUserTextInteraction(sessionId, session, {
+        userText,
+        inputMode: 'voice',
+        shouldSpeak: true,
+        audioFile,
+        audioSizeKB: Math.round(audioBuffer.length / 1024),
+    });
+}
+
+async function processTypedInteraction(sessionId, session, userText) {
+    sendJson(session.ws, { status: 'ai_thinking' });
+    await processUserTextInteraction(sessionId, session, {
+        userText,
+        inputMode: 'text',
+        shouldSpeak: false,
+        audioFile: null,
+        audioSizeKB: 0,
+    });
+}
+
+// 模块：统一文本对话管线。语音 ASR 后和手动打字都会进入这里，保证主题进度、换题和入库规则一致。
+async function processUserTextInteraction(sessionId, session, {
+    userText,
+    inputMode,
+    shouldSpeak,
+    audioFile,
+    audioSizeKB,
+}) {
+    const userId = session.userId;
+
     if (session.topicTransitionPrompt) {
         const topicProfile = await getOrCreateTopicProfile(userId);
         const parsedChoice = parseTopicTransitionChoice(userText, topicProfile.topics);
@@ -2595,7 +2730,6 @@ async function processVoiceInteraction(sessionId, session, audioBuffer, turnMeta
         });
     }
 
-    const audioFile = saveAudioLocally(userId, sessionId, audioBuffer);
     const answeredEntryGuidance = buildAnsweredEntryGuidanceTurn(session.pendingEntryGuidance);
     const answeredTopicOpening = buildAnsweredTopicSwitchOpeningTurn(session.pendingTopicOpening);
     const answeredRecommendationQuestion = buildAnsweredRecommendationQuestionTurn(session.pendingRecommendationQuestion);
@@ -2614,8 +2748,9 @@ async function processVoiceInteraction(sessionId, session, audioBuffer, turnMeta
         ...(answeredPrompt || {}),
         userText,
         aiReply,
+        inputMode,
         audioFile,
-        audioSizeKB: Math.round(audioBuffer.length / 1024),
+        audioSizeKB,
         topicId: selectedTopic?.id || session.currentTopicId || DEFAULT_TOPIC_ID,
         topicTitle: selectedTopic?.title || '',
         topicProgress: selectedTopic?.progress || 0,
@@ -2631,17 +2766,25 @@ async function processVoiceInteraction(sessionId, session, audioBuffer, turnMeta
     }
     decrementTopicTransitionSuppressTurns(session);
 
-    // ── Step 3: 语音合成 (TTS) ──
-    console.log(`[${sessionId}] Step 3: 语音合成中...`);
-    sendJson(session.ws, { status: 'ai_speaking', text: aiReply });
+    if (shouldSpeak) {
+        // ── Step 3: 语音合成 (TTS) ──
+        console.log(`[${sessionId}] Step 3: 语音合成中...`);
+        sendJson(session.ws, { status: 'ai_speaking', text: aiReply });
 
-    const audioData = await synthesizeSpeech(aiReply, session.userPreferences);
-    if (audioData) {
-        session.ws.send(audioData);
-        console.log(`[${sessionId}] TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
+        const audioData = await synthesizeSpeech(aiReply, session.userPreferences);
+        if (audioData) {
+            session.ws.send(audioData);
+            console.log(`[${sessionId}] TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
+        }
+
+        sendJson(session.ws, { event: 'ai_response_end', status: 'ready' });
+    } else {
+        sendJson(session.ws, {
+            event: 'ai_text_response',
+            status: 'ready',
+            text: aiReply,
+        });
     }
-
-    sendJson(session.ws, { event: 'ai_response_end', status: 'ready' });
 
     analyzeTopicProgressFromTurn(sessionId, session, userText, aiReply).catch(err => {
         console.error(`[主题分析] 本轮分析失败:`, err.message);
@@ -2691,12 +2834,15 @@ async function startRecommendationQuestion(sessionId, session, msg) {
         topicProfile,
     });
 
+    const shouldSpeak = shouldSpeakForSession(session);
     sendJson(session.ws, {
         event: 'recommendation_question_started',
-        status: 'ai_speaking',
+        status: shouldSpeak ? 'ai_speaking' : 'ready',
         text: record.aiReply,
         recommendation: session.pendingRecommendationQuestion,
     });
+
+    if (!shouldSpeak) return;
 
     const audioData = await synthesizeSpeech(record.aiReply, session.userPreferences);
     if (audioData) {

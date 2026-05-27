@@ -39,7 +39,7 @@ test('mobile recorder keeps touch targets but frees vertical chat space', () => 
     const source = fs.readFileSync(recorderPath, 'utf8');
 
     assert.match(source, /px-4 pb-3 pt-2/);
-    assert.match(source, /mb-2 grid grid-cols-2/);
+    assert.match(source, /mb-2 grid grid-cols-3/);
     assert.match(source, /min-h-8 text-center/);
     assert.match(source, /min-h-\[60px\]/);
     assert.doesNotMatch(source, /min-h-\[76px\]/);

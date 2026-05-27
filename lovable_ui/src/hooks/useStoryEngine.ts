@@ -86,6 +86,7 @@ export function useStoryEngine() {
   const [wsConnected, setWsConnected] = useState(false);
   const [networkStatus, setNetworkStatus] = useState<"online" | "offline">("offline");
   const [convoState, setConvoState] = useState<ConvoState>("idle");
+  const [inputMode, setInputMode] = useState<"voice" | "text">("voice");
   const [subtitle, setSubtitle] = useState("");
   const [recorderError, setRecorderError] = useState("");
   const [userStats, setUserStats] = useState({ totalConversations: 0, estimatedDurationMin: 0 });
@@ -109,6 +110,7 @@ export function useStoryEngine() {
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const connectWebSocketRef = useRef<(() => void) | null>(null);
   const userPreferencesRef = useRef<UserPreferences>(userPreferences);
+  const inputModeRef = useRef<"voice" | "text">("voice");
 
   // Audio Refs
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -128,6 +130,7 @@ export function useStoryEngine() {
   const currentSourceRef = useRef<window.AudioBufferSourceNode | null>(null);
   const activeAudioSessionRef = useRef<number | null>(null);
   const audioSessionCounterRef = useRef(0);
+  const ignoreIncomingAudioRef = useRef(false);
 
   // Expose frequency data for UI visualizer
   const [frequencyData, setFrequencyData] = useState<Uint8Array | null>(null);
@@ -137,6 +140,10 @@ export function useStoryEngine() {
     userPreferencesRef.current = userPreferences;
     document.documentElement.style.fontSize = buildFontScaleCssValue(userPreferences);
   }, [user, userPreferences]);
+
+  useEffect(() => {
+    inputModeRef.current = inputMode;
+  }, [inputMode]);
 
   // User auth management
   useEffect(() => {
@@ -503,6 +510,37 @@ export function useStoryEngine() {
   const handleJsonMessage = (jsonStr: string) => {
     try {
       const msg = JSON.parse(jsonStr);
+      const appendAiMessage = (text?: string) => {
+        if (!text) return;
+        setChatHistory((prev) => [...prev, { id: Date.now(), role: "ai", text }]);
+      };
+
+      if (msg.event === "input_mode_updated") {
+        if (msg.inputMode === "text" || msg.inputMode === "voice") {
+          inputModeRef.current = msg.inputMode;
+          setInputMode(msg.inputMode);
+        }
+        return;
+      }
+
+      if (msg.event === "ai_text_response") {
+        const text = msg.text || "";
+        appendAiMessage(text);
+        setSubtitle(text);
+        setConvoState("idle");
+        fetchStats();
+        fetchArchive();
+        return;
+      }
+
+      if (msg.event === "text_input_error") {
+        const message = msg.text || "文字发送失败，请再试一次。";
+        setRecorderError(message);
+        setSubtitle(message);
+        setConvoState("idle");
+        return;
+      }
+
       if (msg.status === "ready" && msg.user) {
         setConvoState("idle");
         setSubtitle(msg.text || "");
@@ -534,6 +572,7 @@ export function useStoryEngine() {
       if (msg.event === "topic_transition_prompt" && msg.transition) {
         setPendingTopicTransition(msg.transition);
         setSubtitle(msg.text || msg.transition.text || "");
+        if (msg.status !== "ai_speaking") appendAiMessage(msg.text || msg.transition.text || "");
       }
       if (msg.event === "topic_transition_resolved") {
         setPendingTopicTransition(null);
@@ -542,6 +581,11 @@ export function useStoryEngine() {
       if (msg.event === "topic_switch_opening") {
         setPendingTopicTransition(null);
         setSubtitle(msg.text || "");
+        if (msg.status !== "ai_speaking") appendAiMessage(msg.text || "");
+      }
+      if (msg.event === "recommendation_question_started") {
+        setSubtitle(msg.text || "");
+        if (msg.status !== "ai_speaking") appendAiMessage(msg.text || "");
       }
       if (msg.event === "preferences_updated" && msg.preferences) {
         const preferences = saveLocalUserPreferences(localStorage, msg.preferences);
@@ -576,7 +620,7 @@ export function useStoryEngine() {
       if (msg.text) {
         setSubtitle(msg.text);
         if (msg.status === "ai_speaking") {
-          setChatHistory((prev) => [...prev, { id: Date.now(), role: "ai", text: msg.text }]);
+          appendAiMessage(msg.text);
         }
       }
 
@@ -592,6 +636,8 @@ export function useStoryEngine() {
 
   // Handle incoming WS Audio
   const handleAudioMessage = async (arrayBuffer: ArrayBuffer) => {
+    if (ignoreIncomingAudioRef.current) return;
+
     const audioSessionId = activeAudioSessionRef.current;
     if (!isAudioPlaybackAllowed(audioSessionId, activeAudioSessionRef.current)) return;
 
@@ -802,6 +848,39 @@ export function useStoryEngine() {
     return true;
   }, []);
 
+  // 模块：输入方式同步。文字模式会立即停掉录音和朗读，避免继续占用麦克风或播放 TTS。
+  const sendInputModeToServer = (mode: "voice" | "text") => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "set_input_mode",
+          inputMode: mode,
+        }),
+      );
+    }
+  };
+
+  const enterTextInputMode = () => {
+    inputModeRef.current = "text";
+    setInputMode("text");
+    ignoreIncomingAudioRef.current = true;
+    activeAudioSessionRef.current = null;
+    stopRecording(false);
+    stopPlayback();
+    setRecorderError("");
+    setConvoState((prev) => (prev === "aiTalking" || prev === "userRecording" ? "idle" : prev));
+    sendInputModeToServer("text");
+  };
+
+  const enterVoiceInputMode = () => {
+    inputModeRef.current = "voice";
+    setInputMode("voice");
+    ignoreIncomingAudioRef.current = false;
+    audioSessionCounterRef.current += 1;
+    activeAudioSessionRef.current = audioSessionCounterRef.current;
+    sendInputModeToServer("voice");
+  };
+
   // 模块：录音可视化循环。桌上畅聊只由“讲完了”结束，循环不再用静音截断用户。
   const startVADLoop = useCallback(() => {
     if (!analyserNodeRef.current) return;
@@ -832,6 +911,7 @@ export function useStoryEngine() {
   const [isAutoMode, setIsAutoMode] = useState(false);
 
   const startManualRecord = async () => {
+    enterVoiceInputMode();
     unlockAudioContext();
     stopPlayback();
     const started = await startRecordingCore({
@@ -863,6 +943,7 @@ export function useStoryEngine() {
   };
 
   const startAutoRecord = async () => {
+    enterVoiceInputMode();
     unlockAudioContext();
     stopPlayback();
     const started = await startRecordingCore({
@@ -885,6 +966,28 @@ export function useStoryEngine() {
     stopRecording(false);
     stopPlayback();
     setConvoState("idle");
+  };
+
+  const sendTextMessage = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      setRecorderError("网络未连接，请稍后再试。");
+      return false;
+    }
+
+    enterTextInputMode();
+    setRecorderError("");
+    setChatHistory((prev) => [...prev, { id: Date.now(), role: "user", text: trimmed }]);
+    setConvoState("aiThinking");
+    wsRef.current.send(
+      JSON.stringify({
+        type: "user_text_message",
+        inputMode: "text",
+        text: trimmed,
+      }),
+    );
+    return true;
   };
 
   const selectTopic = async (topicId: string) => {
@@ -982,6 +1085,7 @@ export function useStoryEngine() {
     wsConnected,
     networkStatus,
     convoState,
+    inputMode,
     subtitle,
     hasBiography,
     topicProfile,
@@ -1002,6 +1106,9 @@ export function useStoryEngine() {
     stopManualRecord,
     startAutoRecord,
     stopAutoRecord,
+    sendTextMessage,
+    enterTextInputMode,
+    enterVoiceInputMode,
     stopAll,
     selectTopic,
     respondTopicTransition,

@@ -3,7 +3,7 @@ import { MobileModuleSwitcher, type MobileModuleTab } from "./MobileModuleSwitch
 import { MobileTopicDrawer, type MobileTopic } from "./MobileTopicDrawer";
 import { RecorderControls } from "../story/RecorderControls";
 
-type RecordMode = "hold" | "table";
+type RecordMode = "hold" | "table" | "text";
 type ConversationState = "idle" | "userRecording" | "aiThinking" | "aiTalking";
 
 type MobileAppShellProps<T extends string> = {
@@ -29,6 +29,7 @@ type MobileAppShellProps<T extends string> = {
   onStopManualRecord: () => void;
   onStartAutoRecord: () => void;
   onStopAutoRecord: () => void;
+  onSendTextMessage: (text: string) => boolean | void | Promise<boolean | void>;
   onStopAll: () => void;
 };
 
@@ -56,6 +57,7 @@ export function MobileAppShell<T extends string>({
   onStopManualRecord,
   onStartAutoRecord,
   onStopAutoRecord,
+  onSendTextMessage,
   onStopAll,
 }: MobileAppShellProps<T>) {
   const [topicExpanded, setTopicExpanded] = useState(false);
@@ -127,6 +129,7 @@ export function MobileAppShell<T extends string>({
                 onStopManualRecord={onStopManualRecord}
                 onStartAutoRecord={onStartAutoRecord}
                 onStopAutoRecord={onStopAutoRecord}
+                onSendTextMessage={onSendTextMessage}
                 onStopAll={onStopAll}
               />
             </div>

@@ -1,7 +1,8 @@
 import { Mic, Sparkles, Square } from "lucide-react";
 import { useEffect, useRef, type PointerEvent, type ReactNode } from "react";
+import { TextInputComposer } from "./TextInputComposer";
 
-type RecordMode = "hold" | "table";
+type RecordMode = "hold" | "table" | "text";
 type ConversationState = "idle" | "userRecording" | "aiThinking" | "aiTalking";
 type RecorderAction = () => void | boolean | Promise<void | boolean>;
 
@@ -18,6 +19,7 @@ type RecorderControlsProps = {
   onStopManualRecord: () => void;
   onStartAutoRecord: RecorderAction;
   onStopAutoRecord: () => void;
+  onSendTextMessage: (text: string) => boolean | void | Promise<boolean | void>;
   onStopAll: () => void;
 };
 
@@ -60,10 +62,15 @@ export function RecorderControls({
   onStopManualRecord,
   onStartAutoRecord,
   onStopAutoRecord,
+  onSendTextMessage,
   onStopAll,
 }: RecorderControlsProps) {
   const offline = networkStatus === "offline";
   const holdPointerActiveRef = useRef(false);
+  // 模块：输入模式提示文案。手机端文字输入不再沿用“按住话筒”的语音提示。
+  const textIdleStatus = idleStatus.includes("像聊天一样讲")
+    ? "打字输入，像聊天一样讲"
+    : "打字输入，接着上次的话题继续讲";
 
   useEffect(() => {
     if (!holdPointerActiveRef.current) return;
@@ -106,11 +113,12 @@ export function RecorderControls({
       {/* 模块：富主题换题入口。由首页注入，录音控制只负责摆放在主按钮附近。 */}
       {topicTransitionControls}
 
-      <div className="mb-2 grid grid-cols-2 rounded-xl bg-amber-100 p-1">
+      <div className="mb-2 grid grid-cols-3 rounded-xl bg-amber-100 p-1">
         {(
           [
             { id: "hold", label: "长按说话" },
-            { id: "table", label: "放桌上畅聊" },
+            { id: "table", label: "桌上畅聊" },
+            { id: "text", label: "打字输入" },
           ] as { id: RecordMode; label: string }[]
         ).map((option) => {
           const active = recordMode === option.id;
@@ -131,7 +139,7 @@ export function RecorderControls({
       </div>
 
       <div className="mb-2 min-h-8 text-center">
-        {recorderError ? (
+        {recordMode !== "text" && recorderError ? (
           <p className="text-sm font-black leading-snug text-red-600">{recorderError}</p>
         ) : offline ? (
           <p className="animate-pulse text-sm font-black text-amber-700">网络异常，正在重连...</p>
@@ -146,12 +154,20 @@ export function RecorderControls({
           <p className="text-sm font-black text-blue-600">AI 正在朗读回应...</p>
         ) : (
           <p className="line-clamp-1 text-sm font-bold leading-snug text-stone-700">
-            {idleStatus}
+            {recordMode === "text" ? textIdleStatus : idleStatus}
           </p>
         )}
       </div>
 
-      {convoState === "idle" && (
+      {convoState === "idle" && recordMode === "text" && (
+        <TextInputComposer
+          disabled={offline}
+          onSend={onSendTextMessage}
+          placeholder="打字讲述您的故事"
+        />
+      )}
+
+      {convoState === "idle" && recordMode !== "text" && (
         <button
           type="button"
           disabled={offline}
