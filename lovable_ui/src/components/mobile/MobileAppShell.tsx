@@ -11,6 +11,7 @@ type MobileAppShellProps<T extends string> = {
   activeTab: T;
   storyTabId: T;
   children: ReactNode;
+  topicTransitionControls?: ReactNode;
   topics: MobileTopic[];
   currentTopicId?: string | null;
   recordMode: RecordMode;
@@ -37,6 +38,7 @@ export function MobileAppShell<T extends string>({
   activeTab,
   storyTabId,
   children,
+  topicTransitionControls,
   topics,
   currentTopicId,
   recordMode,
@@ -119,6 +121,7 @@ export function MobileAppShell<T extends string>({
                 idleStatus={idleStatus}
                 frequencyData={frequencyData}
                 recorderError={recorderError}
+                topicTransitionControls={topicTransitionControls}
                 onRecordModeChange={onRecordModeChange}
                 onStartManualRecord={onStartManualRecord}
                 onStopManualRecord={onStopManualRecord}

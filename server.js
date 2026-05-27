@@ -49,6 +49,7 @@ const {
     validateBiographyIdentity,
 } = require('./lib/biographyPrompt');
 const {
+    buildAnsweredRecommendationQuestionTurn,
     buildRecommendationConversationRecord,
     normalizeRecommendationQuestion,
 } = require('./lib/recommendationQuestion');
@@ -61,6 +62,14 @@ const {
 const {
     buildAnsweredEntryGuidanceTurn,
 } = require('./lib/entryGuidanceTurn');
+const {
+    buildTopicTransitionPrompt,
+    parseTopicTransitionChoice,
+} = require('./lib/topicTransitionPrompt');
+const {
+    buildAnsweredTopicSwitchOpeningTurn,
+    buildTopicSwitchOpening,
+} = require('./lib/topicSwitchOpening');
 const {
     normalizeQuestionForElder,
 } = require('./lib/questionSafety');
@@ -2060,6 +2069,10 @@ wss.on('connection', async (ws) => {
         conversationHistory: [],
         pendingEntryGuidance: null,
         pendingRecommendationQuestion: null,
+        pendingTopicOpening: null,
+        topicTransitionPrompt: null,
+        topicTransitionSuppressTurns: 0,
+        richTopicPromptedTopicIds: new Set(),
         userPreferences: { ...DEFAULT_USER_PREFERENCES },
         isProcessing: false,
     });
@@ -2171,6 +2184,7 @@ async function handleMessage(sessionId, session, msg) {
             topicProfile = entry.topicProfile;
             session.currentTopicId = topicProfile.currentTopicId;
             session.pendingEntryGuidance = entry.entryGuidance;
+            session.pendingTopicOpening = null;
             const hasBiography = await checkHasBiography(result.userId);
 
             sendJson(session.ws, {
@@ -2211,6 +2225,7 @@ async function handleMessage(sessionId, session, msg) {
             topicProfile = entry.topicProfile;
             session.currentTopicId = topicProfile.currentTopicId;
             session.pendingEntryGuidance = entry.entryGuidance;
+            session.pendingTopicOpening = null;
             sendJson(session.ws, {
                 status: 'ready',
                 text: entry.entryGuidance.displayText,
@@ -2232,6 +2247,12 @@ async function handleMessage(sessionId, session, msg) {
         return;
     }
 
+    // 处理富主题换题提示的按钮选择。
+    if (msg.type === 'topic_transition_choice') {
+        await handleTopicTransitionChoice(sessionId, session, msg.choice || '', msg.topicId || '');
+        return;
+    }
+
     // 处理主题切换
     if (msg.type === 'select_topic') {
         if (!session.userId) {
@@ -2242,6 +2263,8 @@ async function handleMessage(sessionId, session, msg) {
         try {
             const topicProfile = await updateCurrentTopic(session.userId, msg.topicId);
             session.currentTopicId = topicProfile.currentTopicId;
+            session.topicTransitionPrompt = null;
+            session.pendingTopicOpening = null;
             sendJson(session.ws, {
                 event: 'topic_profile_updated',
                 status: 'ready',
@@ -2370,6 +2393,158 @@ async function handleMessage(sessionId, session, msg) {
     }
 }
 
+function appendSessionHistory(session, message) {
+    session.conversationHistory.push(message);
+    if (session.conversationHistory.length > 40) {
+        session.conversationHistory = session.conversationHistory.slice(-40);
+    }
+}
+
+function decrementTopicTransitionSuppressTurns(session) {
+    if (session.topicTransitionSuppressTurns > 0) {
+        session.topicTransitionSuppressTurns -= 1;
+    }
+}
+
+// 模块：富主题换题提示。后端拥有主题进度和当前主题状态，因此在这里统一决定是否提示。
+async function maybePromptTopicTransition(sessionId, session, topicProfile) {
+    if (!session.userId || !topicProfile) return false;
+
+    const prompt = buildTopicTransitionPrompt({
+        topicProfile,
+        promptedTopicIds: session.richTopicPromptedTopicIds,
+        suppressTurns: session.topicTransitionSuppressTurns,
+    });
+    if (!prompt.shouldPrompt) return false;
+
+    session.topicTransitionPrompt = prompt;
+    session.richTopicPromptedTopicIds.add(prompt.currentTopicId);
+    appendSessionHistory(session, { Role: 'assistant', Content: prompt.text });
+
+    sendJson(session.ws, {
+        event: 'topic_transition_prompt',
+        status: 'ai_speaking',
+        text: prompt.text,
+        transition: prompt,
+    });
+
+    const audioData = await synthesizeSpeech(prompt.text, session.userPreferences);
+    if (audioData) {
+        session.ws.send(audioData);
+        console.log(`[${sessionId}] 富主题换题提示 TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
+    }
+    sendJson(session.ws, { event: 'ai_response_end', status: 'ready' });
+    return true;
+}
+
+// 模块：换题后的新主题开场。只在成功切换主题后触发，确保下一问来自新主题而不是旧上下文。
+async function speakTopicSwitchOpening(sessionId, session, opening) {
+    if (!opening?.text) return false;
+
+    session.pendingTopicOpening = opening;
+    sendJson(session.ws, {
+        event: 'topic_switch_opening',
+        status: 'ai_speaking',
+        text: opening.text,
+        opening,
+    });
+
+    const audioData = await synthesizeSpeech(opening.text, session.userPreferences);
+    if (audioData) {
+        session.ws.send(audioData);
+        console.log(`[${sessionId}] 换题开场 TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
+    }
+    sendJson(session.ws, { event: 'ai_response_end', status: 'ready' });
+    return true;
+}
+
+async function handleTopicTransitionChoice(sessionId, session, choiceText, explicitTopicId = '') {
+    if (!session.userId || !session.topicTransitionPrompt) return false;
+
+    const profile = await getOrCreateTopicProfile(session.userId);
+    const parsed = explicitTopicId
+        ? { intent: 'switch', topicId: explicitTopicId }
+        : parseTopicTransitionChoice(choiceText, profile.topics);
+
+    if (parsed.intent === 'continue' || parsed.intent === 'unknown') {
+        session.topicTransitionPrompt = null;
+        session.pendingTopicOpening = null;
+        session.topicTransitionSuppressTurns = 3;
+        sendJson(session.ws, {
+            event: 'topic_transition_resolved',
+            status: 'ready',
+            choice: 'continue',
+            text: '好的，我们继续讲这个主题。',
+        });
+        return true;
+    }
+
+    if (parsed.intent === 'review') {
+        session.topicTransitionPrompt = null;
+        session.pendingTopicOpening = null;
+        session.topicTransitionSuppressTurns = 3;
+        sendJson(session.ws, {
+            event: 'topic_transition_resolved',
+            status: 'ready',
+            choice: 'review',
+            text: '好的，您可以去回忆库看看整理好的内容。',
+        });
+        return true;
+    }
+
+    if (parsed.intent === 'switch') {
+        const targetTopicId = parsed.topicId || session.topicTransitionPrompt.nextTopicId;
+        if (!targetTopicId) {
+            session.topicTransitionPrompt = null;
+            session.pendingTopicOpening = null;
+            sendJson(session.ws, {
+                event: 'topic_transition_resolved',
+                status: 'ready',
+                choice: 'review',
+                text: '所有主题都已经很丰富了，您可以继续补充，也可以去回忆库看看。',
+            });
+            return true;
+        }
+
+        try {
+            const topicProfile = await updateCurrentTopic(session.userId, targetTopicId);
+            session.currentTopicId = topicProfile.currentTopicId;
+            session.topicTransitionPrompt = null;
+            session.topicTransitionSuppressTurns = 0;
+            session.conversationHistory = [];
+            const opening = buildTopicSwitchOpening({
+                topicProfile,
+                topicId: topicProfile.currentTopicId,
+            });
+            sendJson(session.ws, {
+                event: 'topic_transition_resolved',
+                status: 'ready',
+                choice: 'switch',
+                topicProfile,
+                text: opening?.text || '好的，我们换个话题继续聊。',
+            });
+            sendJson(session.ws, {
+                event: 'topic_profile_updated',
+                status: 'ready',
+                topicProfile,
+            });
+            await speakTopicSwitchOpening(sessionId, session, opening);
+            console.log(`[${sessionId}] 富主题换题到 ${topicProfile.currentTopicId}`);
+            return true;
+        } catch (err) {
+            sendJson(session.ws, {
+                event: 'topic_transition_resolved',
+                status: 'ready',
+                choice: 'error',
+                text: err.message || '换题失败，请稍后再试。',
+            });
+            return false;
+        }
+    }
+
+    return false;
+}
+
 async function processVoiceInteraction(sessionId, session, audioBuffer, turnMeta = {}) {
     const userId = session.userId;
 
@@ -2401,20 +2576,42 @@ async function processVoiceInteraction(sessionId, session, audioBuffer, turnMeta
         text: userText,
     });
 
+    if (session.topicTransitionPrompt) {
+        const topicProfile = await getOrCreateTopicProfile(userId);
+        const parsedChoice = parseTopicTransitionChoice(userText, topicProfile.topics);
+        if (parsedChoice.intent !== 'unknown') {
+            await handleTopicTransitionChoice(sessionId, session, userText, parsedChoice.topicId);
+            return;
+        }
+
+        // 用户直接继续讲故事时，不强行追问选择；按“继续当前主题”处理并进入正常 AI 对话。
+        session.topicTransitionPrompt = null;
+        session.topicTransitionSuppressTurns = 4;
+        sendJson(session.ws, {
+            event: 'topic_transition_resolved',
+            status: 'ai_thinking',
+            choice: 'continue',
+            text: '好的，我们继续讲这个主题。',
+        });
+    }
+
     const audioFile = saveAudioLocally(userId, sessionId, audioBuffer);
     const answeredEntryGuidance = buildAnsweredEntryGuidanceTurn(session.pendingEntryGuidance);
-    const promptSource = answeredEntryGuidance?.promptSource || null;
+    const answeredTopicOpening = buildAnsweredTopicSwitchOpeningTurn(session.pendingTopicOpening);
+    const answeredRecommendationQuestion = buildAnsweredRecommendationQuestionTurn(session.pendingRecommendationQuestion);
+    const answeredPrompt = answeredRecommendationQuestion || answeredTopicOpening || answeredEntryGuidance;
+    const promptSource = answeredPrompt?.promptSource || null;
 
     // ── Step 2: 大模型对话 (混元) ──
     console.log(`[${sessionId}] Step 2: AI 对话中...`);
-    const aiReply = await chatWithAI(sessionId, session, userText, { answeredEntryGuidance });
+    const aiReply = await chatWithAI(sessionId, session, userText, { answeredPrompt });
     console.log(`[${sessionId}] AI 回复: "${aiReply}"`);
 
     const topicProfile = await getOrCreateTopicProfile(userId);
     const selectedTopic = getSelectedTopic(topicProfile, session.currentTopicId);
 
     await saveConversation(sessionId, userId, {
-        ...(answeredEntryGuidance || {}),
+        ...(answeredPrompt || {}),
         userText,
         aiReply,
         audioFile,
@@ -2426,10 +2623,13 @@ async function processVoiceInteraction(sessionId, session, audioBuffer, turnMeta
     if (promptSource === 'entry_guidance') {
         session.pendingEntryGuidance = null;
     }
-
-    analyzeTopicProgressFromTurn(sessionId, session, userText, aiReply).catch(err => {
-        console.error(`[主题分析] 本轮分析失败:`, err.message);
-    });
+    if (promptSource === 'topic_switch_opening') {
+        session.pendingTopicOpening = null;
+    }
+    if (promptSource === 'archive_recommendation') {
+        session.pendingRecommendationQuestion = null;
+    }
+    decrementTopicTransitionSuppressTurns(session);
 
     // ── Step 3: 语音合成 (TTS) ──
     console.log(`[${sessionId}] Step 3: 语音合成中...`);
@@ -2442,6 +2642,10 @@ async function processVoiceInteraction(sessionId, session, audioBuffer, turnMeta
     }
 
     sendJson(session.ws, { event: 'ai_response_end', status: 'ready' });
+
+    analyzeTopicProgressFromTurn(sessionId, session, userText, aiReply).catch(err => {
+        console.error(`[主题分析] 本轮分析失败:`, err.message);
+    });
     console.log(`[${sessionId}] 交互完成`);
 }
 
@@ -2465,8 +2669,9 @@ async function startRecommendationQuestion(sessionId, session, msg) {
     });
     record.aiReply = safeQuestion.question;
 
-    await saveConversation(sessionId, userId, record);
     session.pendingEntryGuidance = null;
+    session.topicTransitionPrompt = null;
+    session.pendingTopicOpening = null;
 
     session.pendingRecommendationQuestion = {
         topicId: record.topicId,
@@ -2513,10 +2718,11 @@ async function recognizeSpeech(audioBuffer) {
 
 async function chatWithAI(sessionId, session, userText, options = {}) {
     try {
-        if (options.answeredEntryGuidance?.aiPromptText) {
+        const answeredPrompt = options.answeredPrompt || options.answeredEntryGuidance;
+        if (answeredPrompt?.aiPromptText) {
             session.conversationHistory.push({
                 Role: 'assistant',
-                Content: options.answeredEntryGuidance.aiPromptText,
+                Content: answeredPrompt.aiPromptText,
             });
         }
         session.conversationHistory.push({ Role: 'user', Content: userText });
@@ -2616,6 +2822,7 @@ async function analyzeTopicProgressFromTurn(sessionId, session, userText, aiRepl
             topicProfile: updatedProfile,
         });
         console.log(`[${sessionId}] 主题进度已推送到前端`);
+        await maybePromptTopicTransition(sessionId, session, updatedProfile);
     }
 }
 

@@ -1,5 +1,5 @@
 import { Mic, Sparkles, Square } from "lucide-react";
-import { useEffect, useRef, type PointerEvent } from "react";
+import { useEffect, useRef, type PointerEvent, type ReactNode } from "react";
 
 type RecordMode = "hold" | "table";
 type ConversationState = "idle" | "userRecording" | "aiThinking" | "aiTalking";
@@ -12,6 +12,7 @@ type RecorderControlsProps = {
   idleStatus: string;
   frequencyData: Uint8Array | null;
   recorderError: string;
+  topicTransitionControls?: ReactNode;
   onRecordModeChange: (mode: RecordMode) => void;
   onStartManualRecord: RecorderAction;
   onStopManualRecord: () => void;
@@ -53,6 +54,7 @@ export function RecorderControls({
   idleStatus,
   frequencyData,
   recorderError,
+  topicTransitionControls,
   onRecordModeChange,
   onStartManualRecord,
   onStopManualRecord,
@@ -101,6 +103,9 @@ export function RecorderControls({
 
   return (
     <section className="shrink-0 border-t border-amber-200 bg-amber-50 px-4 pb-4 pt-3 shadow-[0_-10px_26px_rgba(120,72,30,0.1)]">
+      {/* 模块：富主题换题入口。由首页注入，录音控制只负责摆放在主按钮附近。 */}
+      {topicTransitionControls}
+
       <div className="mb-3 grid grid-cols-2 rounded-2xl bg-amber-100 p-1">
         {(
           [

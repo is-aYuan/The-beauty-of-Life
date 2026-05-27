@@ -55,7 +55,7 @@ export type ChatMessage = {
   status?: VoiceMessageStatus;
   turnId?: string;
   mode?: VoiceMessageMode;
-  source?: "entry_guidance";
+  source?: "entry_guidance" | "topic_switch_opening";
   entryGuidanceId?: string;
 };
 export type LegalConsentInput = {
@@ -71,6 +71,14 @@ export type ServerEntryGuidance = {
   nextQuestion: string;
   shouldAutoSpeak: boolean;
 };
+export type TopicTransitionPrompt = {
+  kind: "switch" | "all_rich";
+  currentTopicId: string;
+  currentTopicTitle: string;
+  nextTopicId: string;
+  nextTopicTitle: string;
+  text: string;
+};
 export type { BiographyTopic, TopicProfile, TopicStatus };
 
 export function useStoryEngine() {
@@ -85,6 +93,8 @@ export function useStoryEngine() {
   const [hasBiography, setHasBiography] = useState(false);
   const [topicProfile, setTopicProfile] = useState<TopicProfile | null>(null);
   const [serverEntryGuidance, setServerEntryGuidance] = useState<ServerEntryGuidance | null>(null);
+  const [pendingTopicTransition, setPendingTopicTransition] =
+    useState<TopicTransitionPrompt | null>(null);
   const [archive, setArchive] = useState<MyArchiveView | null>(null);
   const [biographies, setBiographies] = useState<BiographyBook[]>([]);
   const [userPreferences, setUserPreferences] = useState<UserPreferences>(() =>
@@ -216,6 +226,7 @@ export function useStoryEngine() {
     setConvoState("idle");
     setSubtitle("");
     setServerEntryGuidance(null);
+    setPendingTopicTransition(null);
     setFrequencyData(null);
     setArchive(null);
     setBiographies([]);
@@ -495,6 +506,7 @@ export function useStoryEngine() {
       if (msg.status === "ready" && msg.user) {
         setConvoState("idle");
         setSubtitle(msg.text || "");
+        setPendingTopicTransition(null);
         if (msg.hasBiography !== undefined) setHasBiography(msg.hasBiography);
         if (msg.entryGuidance) {
           setServerEntryGuidance(msg.entryGuidance);
@@ -518,6 +530,18 @@ export function useStoryEngine() {
       }
       if (msg.event === "topic_profile_updated" && msg.topicProfile) {
         setTopicProfile(msg.topicProfile);
+      }
+      if (msg.event === "topic_transition_prompt" && msg.transition) {
+        setPendingTopicTransition(msg.transition);
+        setSubtitle(msg.text || msg.transition.text || "");
+      }
+      if (msg.event === "topic_transition_resolved") {
+        setPendingTopicTransition(null);
+        if (msg.topicProfile) setTopicProfile(msg.topicProfile);
+      }
+      if (msg.event === "topic_switch_opening") {
+        setPendingTopicTransition(null);
+        setSubtitle(msg.text || "");
       }
       if (msg.event === "preferences_updated" && msg.preferences) {
         const preferences = saveLocalUserPreferences(localStorage, msg.preferences);
@@ -865,6 +889,7 @@ export function useStoryEngine() {
 
   const selectTopic = async (topicId: string) => {
     if (!user) return;
+    setPendingTopicTransition(null);
 
     setTopicProfile((prev) => {
       const baseProfile = prev ?? createFallbackTopicProfile(user.userId);
@@ -890,9 +915,24 @@ export function useStoryEngine() {
     }
   };
 
+  // 模块：富主题换题选择。按钮只是辅助入口，语音里的“继续/换一个”由后端同一套协议处理。
+  const respondTopicTransition = (choice: "continue" | "switch" | "review") => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false;
+
+    wsRef.current.send(
+      JSON.stringify({
+        type: "topic_transition_choice",
+        choice,
+        topicId: choice === "switch" ? pendingTopicTransition?.nextTopicId || "" : "",
+      }),
+    );
+    return true;
+  };
+
   const activateArchiveRecommendation = async (recommendation: ArchiveRecommendation) => {
     if (!user) return false;
     unlockAudioContext();
+    setPendingTopicTransition(null);
 
     setTopicProfile((prev) => {
       const baseProfile = prev ?? createFallbackTopicProfile(user.userId);
@@ -946,6 +986,7 @@ export function useStoryEngine() {
     hasBiography,
     topicProfile,
     serverEntryGuidance,
+    pendingTopicTransition,
     archive,
     biographies,
     userPreferences,
@@ -963,6 +1004,7 @@ export function useStoryEngine() {
     stopAutoRecord,
     stopAll,
     selectTopic,
+    respondTopicTransition,
     fetchArchive,
     fetchBiographies,
     generateBiography,

@@ -11,6 +11,8 @@ import {
   X,
   Volume2,
   Type,
+  ArrowRight,
+  RefreshCw,
 } from "lucide-react";
 import { useChatAutoScroll } from "../lib/chatAutoScroll";
 import {
@@ -19,6 +21,10 @@ import {
 } from "../lib/biographyGeneration.js";
 import { buildEntryGuidance } from "../lib/entryGuidance.js";
 import { buildCurrentAiPrompt } from "../lib/currentAiPrompt.js";
+import {
+  getTopicTransitionSecondaryAction,
+  getTopicTransitionSecondaryLabel,
+} from "../lib/topicTransitionPrompt.js";
 import {
   BIOGRAPHY_STYLE_OPTIONS,
   DEFAULT_BIOGRAPHY_STYLE_ID,
@@ -300,6 +306,7 @@ function Index() {
     subtitle,
     topicProfile,
     serverEntryGuidance,
+    pendingTopicTransition,
     archive,
     biographies,
     userPreferences,
@@ -314,6 +321,7 @@ function Index() {
     stopAutoRecord,
     stopAll,
     selectTopic,
+    respondTopicTransition,
     fetchArchive,
     fetchBiographies,
     generateBiography,
@@ -383,6 +391,43 @@ function Index() {
     convoState,
   });
   const shouldShowCurrentAiPrompt = currentAiPrompt.shouldShow;
+  const transitionSecondaryLabel = getTopicTransitionSecondaryLabel(pendingTopicTransition);
+  const handleTopicTransitionSecondary = () => {
+    if (!pendingTopicTransition) return;
+    const action = getTopicTransitionSecondaryAction(pendingTopicTransition);
+    respondTopicTransition(action);
+    if (action === "review") setActiveTab("organizer");
+  };
+  // 模块：富主题换题控制。仅在后端判定当前主题足够丰富后出现，不改变原有语音主流程。
+  const topicTransitionControls = pendingTopicTransition ? (
+    <div className="mx-auto mb-4 max-w-xl rounded-xl border border-amber-200 bg-white/85 p-3 shadow-sm">
+      <p className="text-base font-bold leading-relaxed text-stone-700">
+        {pendingTopicTransition.text}
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => respondTopicTransition("continue")}
+          className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white px-3 text-base font-black text-stone-700 transition-colors hover:bg-stone-50 active:scale-[0.98]"
+        >
+          <RefreshCw className="h-5 w-5" />
+          继续这个主题
+        </button>
+        <button
+          type="button"
+          onClick={handleTopicTransitionSecondary}
+          className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-amber-400 px-3 text-base font-black text-stone-900 transition-colors hover:bg-amber-300 active:scale-[0.98]"
+        >
+          {pendingTopicTransition.nextTopicId ? (
+            <ArrowRight className="h-5 w-5" />
+          ) : (
+            <BookOpen className="h-5 w-5" />
+          )}
+          {transitionSecondaryLabel}
+        </button>
+      </div>
+    </div>
+  ) : null;
 
   const getTopicStatusLabel = (status: string, progress: number) => {
     if (status === "rich" || progress >= 85) return "素材已丰富";
@@ -648,6 +693,7 @@ function Index() {
           idleStatus={entryGuidance.idleStatus}
           frequencyData={frequencyData}
           recorderError={recorderError}
+          topicTransitionControls={topicTransitionControls}
           onTabChange={setActiveTab}
           onLogout={logout}
           onTopicSelect={selectTopic}
@@ -866,6 +912,8 @@ function Index() {
 
             {/* Sticky bottom control panel */}
             <div className="sticky bottom-0 border-t-2 border-amber-200 bg-amber-50 p-4">
+              {topicTransitionControls}
+
               {/* Mode toggle */}
               <div className="mx-auto mb-4 flex w-fit rounded-full bg-amber-100 p-1 text-stone-600">
                 {(

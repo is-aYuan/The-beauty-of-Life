@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+    buildAnsweredRecommendationQuestionTurn,
     buildRecommendationConversationRecord,
     normalizeRecommendationQuestion,
 } = require('../lib/recommendationQuestion');
@@ -57,5 +58,33 @@ test('builds a formal conversation record for archive recommendation question', 
         title: '继续讲讲小时候的河边',
         sourceType: 'recent_summary',
         sourceId: 'summary_1',
+    });
+});
+
+test('builds answered recommendation metadata only after the user replies', () => {
+    const result = buildAnsweredRecommendationQuestionTurn({
+        topicId: 'childhood',
+        topicTitle: '我的孩童时代',
+        question: '小时候跟母亲去河边，您印象最深的是哪一次？',
+        title: '继续讲讲小时候的河边',
+        sourceType: 'recent_summary',
+        sourceId: 'summary_1',
+    });
+
+    assert.deepEqual(result, {
+        promptSource: 'archive_recommendation',
+        aiPromptText: '小时候跟母亲去河边，您印象最深的是哪一次？',
+        aiPromptDisplayText: '小时候跟母亲去河边，您印象最深的是哪一次？',
+        aiPromptTopicId: 'childhood',
+        aiPromptTopicTitle: '我的孩童时代',
+        aiPromptNextQuestion: '小时候跟母亲去河边，您印象最深的是哪一次？',
+        excludeAiPromptFromSummary: true,
+        excludeAiPromptFromStats: true,
+        excludeAiPromptFromBiography: true,
+        recommendation: {
+            title: '继续讲讲小时候的河边',
+            sourceType: 'recent_summary',
+            sourceId: 'summary_1',
+        },
     });
 });
