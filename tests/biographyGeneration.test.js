@@ -7,10 +7,10 @@ const {
     getLatestBiography,
 } = require('../lib/biographyGeneration');
 
-test('blocks biography generation until at least one topic reaches 80 percent', () => {
+test('blocks biography generation until at least one topic reaches 85 percent', () => {
     const decision = buildBiographyGenerationDecision({
         topics: [
-            { id: 'childhood', progress: 79 },
+            { id: 'childhood', progress: 84 },
             { id: 'parents_home', progress: 20 },
         ],
         biographies: [],
@@ -18,13 +18,13 @@ test('blocks biography generation until at least one topic reaches 80 percent', 
 
     assert.equal(decision.canGenerate, false);
     assert.equal(decision.reason, 'needs_story');
-    assert.equal(decision.message, '先去讲讲您的故事吧，至少需要一个主题进度达到80%。');
+    assert.equal(decision.message, '先去讲讲您的故事吧，至少需要一个主题进度达到85%。');
 });
 
 test('allows direct generation when one topic is ready and no biography exists', () => {
     const decision = buildBiographyGenerationDecision({
         topics: [
-            { id: 'childhood', progress: 80 },
+            { id: 'childhood', progress: 85 },
             { id: 'parents_home', progress: 10 },
         ],
         biographies: [],
@@ -32,7 +32,7 @@ test('allows direct generation when one topic is ready and no biography exists',
 
     assert.equal(decision.canGenerate, true);
     assert.equal(decision.requiresConfirmation, false);
-    assert.equal(decision.maxTopicProgress, 80);
+    assert.equal(decision.maxTopicProgress, 85);
 });
 
 test('requires confirmation when regenerating an existing biography', () => {

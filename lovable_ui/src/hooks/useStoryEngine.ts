@@ -79,6 +79,7 @@ export type TopicTransitionPrompt = {
   nextTopicTitle: string;
   text: string;
 };
+type BiographyDownloadFormat = "pdf" | "docx";
 export type { BiographyTopic, TopicProfile, TopicStatus };
 
 export function useStoryEngine() {
@@ -1080,6 +1081,52 @@ export function useStoryEngine() {
     }
   };
 
+  const getExportFileName = (header: string | null, fallback: string) => {
+    if (!header) return fallback;
+    const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/);
+    if (utf8Match?.[1]) {
+      try {
+        return decodeURIComponent(utf8Match[1]);
+      } catch {
+        return fallback;
+      }
+    }
+    const plainMatch = header.match(/filename="([^"]+)"/);
+    return plainMatch?.[1] || fallback;
+  };
+
+  // 模块：回忆录文件下载。只下载已生成文件，不触发 AI 生成或语音合成。
+  const downloadBiography = async (format: BiographyDownloadFormat) => {
+    if (!user) return { success: false, error: "请先登录" };
+    try {
+      const res = await fetch(
+        `${CONFIG.API_BASE}/api/biographies/${user.userId}/export?format=${format}`,
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return { success: false, error: data.error || "下载失败，请稍后再试。" };
+      }
+
+      const blob = await res.blob();
+      const filename = getExportFileName(
+        res.headers.get("Content-Disposition"),
+        format === "pdf" ? "我的回忆录.pdf" : "我的回忆录.docx",
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 500);
+      return { success: true };
+    } catch (e) {
+      console.error(e);
+      return { success: false, error: "网络错误，请稍后再试" };
+    }
+  };
+
   return {
     user,
     wsConnected,
@@ -1115,6 +1162,7 @@ export function useStoryEngine() {
     fetchArchive,
     fetchBiographies,
     generateBiography,
+    downloadBiography,
     activateArchiveRecommendation,
     updateUserPreferences,
     unlockAudioContext,

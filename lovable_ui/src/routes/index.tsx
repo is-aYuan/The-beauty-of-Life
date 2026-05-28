@@ -13,6 +13,7 @@ import {
   Type,
   ArrowRight,
   RefreshCw,
+  Download,
 } from "lucide-react";
 import { useChatAutoScroll } from "../lib/chatAutoScroll";
 import {
@@ -53,6 +54,7 @@ export const Route = createFileRoute("/")({
 
 type Tab = "story" | "organizer" | "family" | "settings";
 type RecordMode = "hold" | "table" | "text";
+type BiographyDownloadFormat = "pdf" | "docx";
 
 const NAV_ITEMS: { id: Tab; label: string; icon: typeof Mic }[] = [
   { id: "story", label: "讲我的故事", icon: Mic },
@@ -329,6 +331,7 @@ function Index() {
     fetchArchive,
     fetchBiographies,
     generateBiography,
+    downloadBiography,
     activateArchiveRecommendation,
     updateUserPreferences,
   } = useStoryEngine();
@@ -336,7 +339,11 @@ function Index() {
   const [activeTab, setActiveTab] = useState<Tab>("story");
   const [recordMode, setRecordMode] = useState<RecordMode>("hold");
   const [biographyGenerating, setBiographyGenerating] = useState(false);
+  const [biographyDownloading, setBiographyDownloading] = useState<BiographyDownloadFormat | null>(
+    null,
+  );
   const [styleDialogOpen, setStyleDialogOpen] = useState(false);
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const isMobile = useIsMobile();
@@ -478,6 +485,33 @@ function Index() {
     }
   };
 
+  // 模块：回忆录下载入口。下载只读取已生成版本，素材不足时沿用生成门槛提示。
+  const handleOpenDownloadBiography = () => {
+    if (!latestBiography) {
+      window.alert(
+        biographyDecision.canGenerate
+          ? "还没有可下载的回忆录，请先生成最新回忆录。"
+          : biographyDecision.message,
+      );
+      return;
+    }
+    setDownloadDialogOpen(true);
+  };
+
+  const handleDownloadBiography = async (format: BiographyDownloadFormat) => {
+    setBiographyDownloading(format);
+    try {
+      const result = await downloadBiography(format);
+      if (!result.success) {
+        window.alert(result.error || "下载失败，请稍后再试。");
+        return;
+      }
+      setDownloadDialogOpen(false);
+    } finally {
+      setBiographyDownloading(null);
+    }
+  };
+
   // 模块：移动端主内容。手机端只渲染当前模块，避免桌面三栏压缩到窄屏。
   const mobileMainContent =
     activeTab === "organizer" ? (
@@ -500,14 +534,26 @@ function Index() {
                     <BookOpen className="h-6 w-6 text-amber-700" />
                     <h3 className="text-xl font-black text-stone-800">我的回忆录</h3>
                   </div>
-                  <button
-                    onClick={handleGenerateBiography}
-                    disabled={biographyGenerating}
-                    className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-stone-800 px-4 text-base font-black text-amber-50 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <Sparkles className={`h-5 w-5 ${biographyGenerating ? "animate-spin" : ""}`} />
-                    {biographyGenerating ? "正在整理..." : "生成最新回忆录"}
-                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={handleGenerateBiography}
+                      disabled={biographyGenerating}
+                      className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-stone-800 px-3 text-sm font-black text-amber-50 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Sparkles
+                        className={`h-5 w-5 shrink-0 ${biographyGenerating ? "animate-spin" : ""}`}
+                      />
+                      {biographyGenerating ? "正在整理..." : "生成最新回忆录"}
+                    </button>
+                    <button
+                      onClick={handleOpenDownloadBiography}
+                      disabled={!!biographyDownloading}
+                      className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-100 px-3 text-sm font-black text-stone-900 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Download className="h-5 w-5 shrink-0" />
+                      下载我的回忆录
+                    </button>
+                  </div>
                 </div>
 
                 {latestBiography ? (
@@ -550,7 +596,7 @@ function Index() {
                   </div>
                 ) : (
                   <p className="mt-4 text-base leading-relaxed text-stone-600">
-                    还没有生成回忆录。等至少一个主题进度达到 80% 后，我就可以帮您整理成一版故事。
+                    还没有生成回忆录。等至少一个主题进度达到 85% 后，我就可以帮您整理成一版故事。
                   </p>
                 )}
               </section>
@@ -682,6 +728,49 @@ function Index() {
     </div>
   ) : null;
 
+  const biographyDownloadDialog = downloadDialogOpen ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/55 p-6">
+      <div className="w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-black text-stone-900">下载我的回忆录</h2>
+            <p className="mt-2 text-base leading-relaxed text-stone-500">
+              请选择下载格式。PDF 适合分享和打印，Word 适合家人继续编辑。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDownloadDialogOpen(false)}
+            className="rounded-full border border-stone-200 p-2 text-stone-400 hover:bg-stone-50"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mt-6 grid gap-3">
+          <button
+            type="button"
+            onClick={() => void handleDownloadBiography("pdf")}
+            disabled={!!biographyDownloading}
+            className="flex min-h-14 items-center justify-center gap-3 rounded-2xl bg-stone-800 px-5 text-lg font-black text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
+          >
+            <Download className="h-5 w-5" />
+            {biographyDownloading === "pdf" ? "正在准备 PDF..." : "下载 PDF"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleDownloadBiography("docx")}
+            disabled={!!biographyDownloading}
+            className="flex min-h-14 items-center justify-center gap-3 rounded-2xl border border-amber-300 bg-amber-100 px-5 text-lg font-black text-stone-900 shadow-sm transition-transform hover:scale-[1.02] hover:bg-amber-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
+          >
+            <Download className="h-5 w-5" />
+            {biographyDownloading === "docx" ? "正在准备 Word..." : "下载 Word"}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   if (isMobile) {
     return (
       <>
@@ -713,6 +802,7 @@ function Index() {
           {mobileMainContent}
         </MobileAppShell>
         {biographyStyleDialog}
+        {biographyDownloadDialog}
       </>
     );
   }
@@ -778,16 +868,26 @@ function Index() {
                         <BookOpen className="h-7 w-7 text-amber-700" />
                         <h3 className="text-2xl font-bold text-stone-800">我的回忆录</h3>
                       </div>
-                      <button
-                        onClick={handleGenerateBiography}
-                        disabled={biographyGenerating}
-                        className="flex items-center gap-2 rounded-xl bg-stone-800 px-5 py-3 text-lg font-bold text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
-                      >
-                        <Sparkles
-                          className={`h-5 w-5 ${biographyGenerating ? "animate-spin" : ""}`}
-                        />
-                        {biographyGenerating ? "正在整理..." : "生成最新回忆录"}
-                      </button>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          onClick={handleGenerateBiography}
+                          disabled={biographyGenerating}
+                          className="flex items-center gap-2 rounded-xl bg-stone-800 px-5 py-3 text-lg font-bold text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
+                        >
+                          <Sparkles
+                            className={`h-5 w-5 ${biographyGenerating ? "animate-spin" : ""}`}
+                          />
+                          {biographyGenerating ? "正在整理..." : "生成最新回忆录"}
+                        </button>
+                        <button
+                          onClick={handleOpenDownloadBiography}
+                          disabled={!!biographyDownloading}
+                          className="flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-100 px-5 py-3 text-lg font-bold text-stone-900 shadow-sm transition-transform hover:scale-[1.02] hover:bg-amber-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
+                        >
+                          <Download className="h-5 w-5" />
+                          下载我的回忆录
+                        </button>
+                      </div>
                     </div>
 
                     {latestBiography ? (
@@ -832,7 +932,7 @@ function Index() {
                       </div>
                     ) : (
                       <p className="mt-4 text-lg leading-relaxed text-stone-600">
-                        还没有生成回忆录。等至少一个主题进度达到 80%
+                        还没有生成回忆录。等至少一个主题进度达到 85%
                         后，我就可以帮您整理成一版故事。
                       </p>
                     )}
@@ -1105,6 +1205,7 @@ function Index() {
       </aside>
 
       {biographyStyleDialog}
+      {biographyDownloadDialog}
     </main>
   );
 }

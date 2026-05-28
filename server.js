@@ -78,6 +78,13 @@ const {
     getLatestBiography,
 } = require('./lib/biographyGeneration');
 const {
+    buildBiographyExportFileName,
+    buildBiographyExportModel,
+    createBiographyExportBuffer,
+    getBiographyExportContentType,
+    normalizeBiographyExportFormat,
+} = require('./lib/biographyExport');
+const {
     buildAdminTopicProfileResponse,
 } = require('./lib/adminTopicProfile');
 const {
@@ -1357,6 +1364,47 @@ async function generateBiography(userId, options = {}) {
     };
 }
 
+// 模块：回忆录下载导出。只读取已生成 biographies，不触发 AI 生成，也不写入数据库。
+function buildContentDisposition(filename) {
+    const fallback = 'memoir-download';
+    return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+async function sendBiographyExport(res, userId, formatValue) {
+    const format = normalizeBiographyExportFormat(formatValue);
+    if (!format) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: '不支持的回忆录下载格式' }));
+        return;
+    }
+
+    const [biographies, userProfile] = await Promise.all([
+        getUserBiographies(userId),
+        getUserProfile(userId),
+    ]);
+    const latestBiography = getLatestBiography(biographies);
+    if (!latestBiography) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: '还没有可下载的回忆录，请先生成最新回忆录。' }));
+        return;
+    }
+
+    const exportModel = buildBiographyExportModel({
+        biography: latestBiography,
+        userProfile,
+    });
+    const fileName = buildBiographyExportFileName(exportModel, format);
+    const fileBuffer = await createBiographyExportBuffer(exportModel, format);
+
+    res.writeHead(200, {
+        'Content-Type': getBiographyExportContentType(format),
+        'Content-Length': fileBuffer.length,
+        'Content-Disposition': buildContentDisposition(fileName),
+        'Cache-Control': 'no-store',
+    });
+    res.end(fileBuffer);
+}
+
 function parseJsonBody(rawBody) {
     if (!rawBody) return {};
     try {
@@ -1726,6 +1774,19 @@ const server = http.createServer(async (req, res) => {
         } catch (err) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: err.message }));
+        }
+        return;
+    }
+
+    // GET /api/biographies/[^/]+/export：下载已生成回忆录，不重新调用 AI。
+    const biographyExportMatch = url.pathname.match(/^\/api\/biographies\/([^/]+)\/export$/);
+    if (biographyExportMatch && req.method === 'GET') {
+        const userId = biographyExportMatch[1];
+        try {
+            await sendBiographyExport(res, userId, url.searchParams.get('format'));
+        } catch (err) {
+            res.writeHead(err.statusCode || 500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: err.message || '回忆录下载失败，请稍后再试。' }));
         }
         return;
     }
