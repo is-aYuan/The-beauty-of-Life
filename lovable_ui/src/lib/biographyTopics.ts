@@ -9,6 +9,7 @@ export type BiographyTopic = {
   knownFacts: string[];
   concreteStories: string[];
   missingInfo: string[];
+  userFacingCue: string;
   suggestedNextQuestion: string;
   lastDiscussedAt: string | null;
 };
@@ -50,6 +51,7 @@ export function createFallbackTopicProfile(userId: string): TopicProfile {
       knownFacts: [],
       concreteStories: [],
       missingInfo: [],
+      userFacingCue: "",
       suggestedNextQuestion: "",
       lastDiscussedAt: null,
     })),

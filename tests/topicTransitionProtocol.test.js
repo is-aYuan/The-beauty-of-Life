@@ -31,6 +31,21 @@ test('server wires rich topic transition prompts into websocket flow', () => {
     assert.match(source, /pendingTopicOpening/);
 });
 
+test('manual topic selection resets stale context and starts the selected topic opening', () => {
+    const source = fs.readFileSync(serverPath, 'utf8');
+    const start = source.indexOf("if (msg.type === 'select_topic')");
+    const end = source.indexOf("// 处理个性化设置更新", start);
+    const selectTopicBlock = source.slice(start, end);
+
+    assert.notEqual(start, -1);
+    assert.notEqual(end, -1);
+    assert.match(selectTopicBlock, /session\.conversationHistory = \[\];/);
+    assert.match(selectTopicBlock, /session\.pendingEntryGuidance = null;/);
+    assert.match(selectTopicBlock, /session\.pendingRecommendationQuestion = null;/);
+    assert.match(selectTopicBlock, /buildTopicSwitchOpening\(\{/);
+    assert.match(selectTopicBlock, /await speakTopicSwitchOpening\(sessionId, session, opening\);/);
+});
+
 test('archive recommendation questions are saved only after user answers', () => {
     const source = fs.readFileSync(serverPath, 'utf8');
 

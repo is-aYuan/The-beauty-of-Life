@@ -118,4 +118,8 @@ test('builds a per-turn topic analysis prompt with the current turn and topic pr
     assert.match(prompt, /用户本轮发言：我年轻时候在纺织厂上班/);
     assert.match(prompt, /严格输出 JSON/);
     assert.match(prompt, /topicAnalysis/);
+    assert.match(prompt, /userFacingCue/);
+    assert.match(prompt, /可以直接朗读给用户听/);
+    assert.match(prompt, /禁止写“用户提到/);
+    assert.match(prompt, /如果本轮没有形成可展示记忆，就返回空字符串/);
 });

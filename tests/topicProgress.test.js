@@ -31,6 +31,28 @@ test('applies topic analysis without decreasing existing progress', () => {
     assert.equal(topic.lastDiscussedAt, '2026-05-16T00:00:00.000Z');
 });
 
+test('stores only safe user-facing cues from topic analysis', () => {
+    const profile = createDefaultTopicProfile('user_1');
+
+    const updated = applyTopicAnalysisToProfile(profile, {
+        topicId: 'work_livelihood',
+        progress: 20,
+        userFacingCue: '您上次提到第一份工作是在五金店帮忙。',
+    }, '2026-05-16T00:00:00.000Z');
+
+    const topic = updated.topics.find((item) => item.id === 'work_livelihood');
+    assert.equal(topic.userFacingCue, '您上次提到第一份工作是在五金店帮忙');
+
+    const next = applyTopicAnalysisToProfile(updated, {
+        topicId: 'work_livelihood',
+        progress: 25,
+        userFacingCue: '未提供任何关于工作与生计的信息，对话主要围绕恋爱经历但用户拒绝讲述。',
+    }, '2026-05-17T00:00:00.000Z');
+
+    const nextTopic = next.topics.find((item) => item.id === 'work_livelihood');
+    assert.equal(nextTopic.userFacingCue, '您上次提到第一份工作是在五金店帮忙');
+});
+
 test('merges topic analysis arrays and person profile updates', () => {
     const profile = createDefaultTopicProfile('user_1');
     profile.personProfile = { hometown: '河南' };

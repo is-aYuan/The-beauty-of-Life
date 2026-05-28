@@ -2369,11 +2369,22 @@ async function handleMessage(sessionId, session, msg) {
             session.currentTopicId = topicProfile.currentTopicId;
             session.topicTransitionPrompt = null;
             session.pendingTopicOpening = null;
+            session.pendingEntryGuidance = null;
+            session.pendingRecommendationQuestion = null;
+            session.topicTransitionSuppressTurns = 0;
+            session.conversationHistory = [];
+
+            const opening = buildTopicSwitchOpening({
+                topicProfile,
+                topicId: topicProfile.currentTopicId,
+            });
+
             sendJson(session.ws, {
                 event: 'topic_profile_updated',
                 status: 'ready',
                 topicProfile,
             });
+            await speakTopicSwitchOpening(sessionId, session, opening);
         } catch (err) {
             sendJson(session.ws, {
                 event: 'topic_profile_error',
