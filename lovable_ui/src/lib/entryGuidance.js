@@ -11,7 +11,7 @@ function isFirstTimeUser(input) {
 function buildOnboardingPrompt(input) {
   const topicTitle = normalizeText(input.currentTopicTitle) || DEFAULT_TOPIC_TITLE;
 
-  return `我们可以先从“${topicTitle}”开始。您也可以在右边选择其他想聊的主题。选好后，按住下面的话筒，像聊天一样讲。`;
+  return `我们可以先从“${topicTitle}”开始。您也可以在右边选择其他想聊的主题。选好后，可以长按说话、录音上传，或者打字输入。`;
 }
 
 function normalizeServerEntryGuidance(value) {
@@ -45,7 +45,6 @@ export function buildEntryGuidance(input) {
     return {
       firstTimeUser,
       storyPrompt,
-      idleStatus: '正在连接...',
       speechText: serverGuidance?.speechText || '',
       shouldAutoSpeak: Boolean(serverGuidance?.shouldAutoSpeak),
       topicId: serverGuidance?.topicId || '',
@@ -56,7 +55,6 @@ export function buildEntryGuidance(input) {
   return {
     firstTimeUser,
     storyPrompt,
-    idleStatus: firstTimeUser ? '按住话筒，像聊天一样讲' : '按住话筒，接着上次的话题继续讲',
     speechText: serverGuidance?.speechText || '',
     shouldAutoSpeak: Boolean(serverGuidance?.shouldAutoSpeak),
     topicId: serverGuidance?.topicId || '',

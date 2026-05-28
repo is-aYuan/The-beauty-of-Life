@@ -17,7 +17,6 @@ type MobileAppShellProps<T extends string> = {
   recordMode: RecordMode;
   convoState: ConversationState;
   networkStatus: string;
-  idleStatus: string;
   frequencyData: Uint8Array | null;
   recorderError: string;
   onTabChange: (tab: T) => void;
@@ -45,7 +44,6 @@ export function MobileAppShell<T extends string>({
   recordMode,
   convoState,
   networkStatus,
-  idleStatus,
   frequencyData,
   recorderError,
   onTabChange,
@@ -120,7 +118,6 @@ export function MobileAppShell<T extends string>({
                 recordMode={recordMode}
                 convoState={convoState}
                 networkStatus={networkStatus}
-                idleStatus={idleStatus}
                 frequencyData={frequencyData}
                 recorderError={recorderError}
                 topicTransitionControls={topicTransitionControls}

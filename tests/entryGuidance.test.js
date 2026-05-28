@@ -14,9 +14,9 @@ test('shows onboarding guidance instead of continuation copy for first-time user
         subtitle: '您好，胡敏先！请继续讲您的故事，我会帮您记录下来。',
     });
 
-    assert.equal(guidance.storyPrompt, '我们可以先从“我的孩童时代”开始。您也可以在右边选择其他想聊的主题。选好后，按住下面的话筒，像聊天一样讲。');
+    assert.equal(guidance.storyPrompt, '我们可以先从“我的孩童时代”开始。您也可以在右边选择其他想聊的主题。选好后，可以长按说话、录音上传，或者打字输入。');
     assert.doesNotMatch(guidance.storyPrompt, /继续/);
-    assert.equal(guidance.idleStatus, '按住话筒，像聊天一样讲');
+    assert.equal('idleStatus' in guidance, false);
 });
 
 test('keeps continuation guidance for users who already have conversations', async () => {
@@ -33,7 +33,7 @@ test('keeps continuation guidance for users who already have conversations', asy
     });
 
     assert.equal(guidance.storyPrompt, '您好，胡敏先！请继续讲您的故事，我会帮您记录下来。');
-    assert.equal(guidance.idleStatus, '按住话筒，接着上次的话题继续讲');
+    assert.equal('idleStatus' in guidance, false);
 });
 
 test('prefers server entry guidance display text and returning status', async () => {
@@ -63,7 +63,7 @@ test('prefers server entry guidance display text and returning status', async ()
         guidance.storyPrompt,
         '上次我们聊到“我的孩童时代”。今天可以接着说说：小时候家里谁最照顾您？',
     );
-    assert.equal(guidance.idleStatus, '按住话筒，接着上次的话题继续讲');
+    assert.equal('idleStatus' in guidance, false);
     assert.equal(guidance.speechText, '欢迎回来，胡敏先。上次我们聊到“我的孩童时代”。今天可以接着说说：小时候家里谁最照顾您？');
     assert.equal(guidance.shouldAutoSpeak, true);
 });

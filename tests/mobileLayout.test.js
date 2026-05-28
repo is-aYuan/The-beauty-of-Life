@@ -39,6 +39,9 @@ test('mobile shell separates module navigation, topic selection, and recorder co
     assert.match(topicSource, /aria-expanded/);
     assert.match(recorderSource, /模块：录音控制区/);
     assert.match(recorderSource, /长按说话/);
+    assert.match(recorderSource, /录音上传/);
+    assert.match(recorderSource, /打字输入/);
+    assert.doesNotMatch(recorderSource, /桌上畅聊/);
     assert.match(recorderSource, /停止播放/);
 });
 
@@ -62,9 +65,13 @@ test('mobile navigation uses the right side action for logout instead of module 
     const switcherSource = fs.readFileSync(switcherPath, 'utf8');
 
     assert.match(shellSource, /onLogout/);
-    assert.match(switcherSource, /退出/);
+    assert.match(switcherSource, /aria-label="退出登录"/);
+    assert.match(switcherSource, /h-10 w-10/);
+    assert.match(switcherSource, /sr-only/);
     assert.doesNotMatch(switcherSource, /功能模块/);
     assert.doesNotMatch(switcherSource, /aria-expanded/);
+    assert.doesNotMatch(switcherSource, /min-w-14/);
+    assert.doesNotMatch(switcherSource, />退出<\/span>/);
 });
 
 test('mobile settings page owns its vertical scrolling when font size is large', () => {
@@ -114,4 +121,13 @@ test('mobile topic selection uses the same warm gold palette as recording contro
     assert.match(topicSource, /shadow-\[0_10px_24px_rgba\(160,120,30,0\.18\)\]/);
     assert.match(topicSource, /data-mobile-topic-collapse[\s\S]*bg-\[#FFEA92\]/);
     assert.doesNotMatch(topicSource, /bg-amber-300/);
+});
+
+test('mobile collapsed topic row uses chat topic wording and compact sizing', () => {
+    const topicSource = fs.readFileSync(topicDrawerPath, 'utf8');
+
+    assert.match(topicSource, /聊天主题：/);
+    assert.match(topicSource, /px-4 py-2/);
+    assert.match(topicSource, /min-h-\[52px\]/);
+    assert.doesNotMatch(topicSource, />当前主题</);
 });

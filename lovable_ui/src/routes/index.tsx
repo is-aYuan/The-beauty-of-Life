@@ -387,7 +387,7 @@ function Index() {
   };
 
   const memoirTitle = buildMemoirTitle(user.name);
-  const companionStatsText = `今日陪伴 · ${userStats.totalConversations} 段 · ${userStats.estimatedDurationMin} 分钟`;
+  const companionStatsText = `陪伴记录 · ${userStats.totalConversations} 段 · ${userStats.estimatedDurationMin} 分钟`;
   const currentTopic = topicProfile?.topics.find(
     (topic) => topic.id === topicProfile.currentTopicId,
   );
@@ -447,6 +447,8 @@ function Index() {
       </div>
     </div>
   ) : null;
+  // 模块：桌面端状态提示行。空闲状态不展示说明，避免和模式按钮、主按钮重复。
+  const showDesktopStatusLine = convoState !== "idle" || networkStatus === "offline";
 
   const getTopicStatusLabel = (status: string, progress: number) => {
     if (status === "rich" || progress >= 85) return "素材已丰富";
@@ -646,9 +648,15 @@ function Index() {
       </div>
     ) : (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <header className="shrink-0 border-b border-amber-200 px-4 py-2.5">
-          <h2 className="text-xl font-black leading-tight text-stone-900">{memoirTitle}</h2>
-          <p className="mt-1 text-sm font-semibold text-stone-600">{companionStatsText}</p>
+        <header className="shrink-0 border-b border-amber-200 px-4 py-2">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <h2 className="text-[22px] font-black leading-tight text-stone-900">
+              {memoirTitle}
+            </h2>
+            <p className="text-sm font-bold leading-tight text-stone-500">
+              · {companionStatsText}
+            </p>
+          </div>
         </header>
 
         <div ref={chatScrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
@@ -783,7 +791,6 @@ function Index() {
           recordMode={recordMode}
           convoState={convoState}
           networkStatus={networkStatus}
-          idleStatus={entryGuidance.idleStatus}
           frequencyData={frequencyData}
           recorderError={recorderError}
           topicTransitionControls={topicTransitionControls}
@@ -1012,11 +1019,11 @@ function Index() {
               {topicTransitionControls}
 
               {/* Mode toggle */}
-              <div className="mx-auto mb-2 flex w-fit rounded-full bg-amber-100 p-1 text-stone-600">
+              <div className="mx-auto mb-3 grid w-full max-w-md grid-cols-3 rounded-full bg-amber-100 p-1 text-stone-600">
                 {(
                   [
                     { id: "hold", label: "长按说话" },
-                    { id: "table", label: "桌上畅聊" },
+                    { id: "table", label: "录音上传" },
                     { id: "text", label: "打字输入" },
                   ] as { id: RecordMode; label: string }[]
                 ).map((opt) => {
@@ -1025,7 +1032,7 @@ function Index() {
                     <button
                       key={opt.id}
                       onClick={() => handleRecordModeChange(opt.id)}
-                      className={`rounded-full px-4 py-1.5 text-base transition-all ${
+                      className={`min-h-[46px] rounded-full px-5 text-lg transition-all ${
                         active
                           ? "bg-white font-bold text-stone-800 shadow-sm"
                           : "text-stone-600 hover:text-stone-800"
@@ -1038,30 +1045,26 @@ function Index() {
               </div>
 
               {/* Dynamic status area */}
-              <div className="mb-3 min-h-[34px] text-center">
-                {networkStatus === "offline" ? (
-                  <p className="animate-pulse text-lg font-medium text-amber-600">
-                    爷爷，网络打了个盹，正在努力重连...
-                  </p>
-                ) : convoState === "userRecording" ? (
-                  <>
-                    <p className="text-lg font-bold text-emerald-600">正在听您说...</p>
-                    <MiniVisualizer freqData={frequencyData} />
-                  </>
-                ) : convoState === "aiThinking" ? (
-                  <p className="animate-pulse text-lg font-medium text-orange-500">
-                    AI 正在思考处理中...
-                  </p>
-                ) : convoState === "aiTalking" ? (
-                  <p className="text-lg font-medium text-blue-600">AI 正在为您朗读回应...</p>
-                ) : (
-                  <p className="line-clamp-1 text-lg font-medium text-stone-700">
-                    {recordMode === "text"
-                      ? "打字输入，接着上次的话题继续讲"
-                      : entryGuidance.idleStatus}
-                  </p>
-                )}
-              </div>
+              {showDesktopStatusLine && (
+                <div className="mb-3 min-h-[34px] text-center">
+                  {networkStatus === "offline" ? (
+                    <p className="animate-pulse text-lg font-medium text-amber-600">
+                      爷爷，网络打了个盹，正在努力重连...
+                    </p>
+                  ) : convoState === "userRecording" ? (
+                    <>
+                      <p className="text-lg font-bold text-emerald-600">正在听您说...</p>
+                      <MiniVisualizer freqData={frequencyData} />
+                    </>
+                  ) : convoState === "aiThinking" ? (
+                    <p className="animate-pulse text-lg font-medium text-orange-500">
+                      AI 正在思考处理中...
+                    </p>
+                  ) : convoState === "aiTalking" ? (
+                    <p className="text-lg font-medium text-blue-600">AI 正在为您朗读回应...</p>
+                  ) : null}
+                </div>
+              )}
 
               {/* Action buttons */}
               {convoState === "idle" && recordMode === "text" && (
@@ -1091,10 +1094,10 @@ function Index() {
                       }
                     }}
                     onClick={() => recordMode === "table" && startAutoRecord()}
-                    className="flex min-h-[58px] items-center gap-2 rounded-xl border border-[#F5D76B] bg-[#FFEA92] px-7 py-0 text-xl font-bold text-[#241F1C] shadow-[0_8px_18px_rgba(160,120,30,0.16)] transition-transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:border-[#D8D0C0] disabled:bg-[#E8E1D3] disabled:text-[#8A8174] disabled:hover:scale-100 cursor-pointer"
+                    className="flex min-h-[64px] min-w-[240px] items-center justify-center gap-3 rounded-2xl border border-[#F5D76B] bg-[#FFEA92] px-9 py-0 text-2xl font-bold text-[#241F1C] shadow-[0_8px_18px_rgba(160,120,30,0.16)] transition-transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:border-[#D8D0C0] disabled:bg-[#E8E1D3] disabled:text-[#8A8174] disabled:hover:scale-100 cursor-pointer"
                   >
-                    <Mic className="h-6 w-6" />
-                    {recordMode === "hold" ? "长按 开始讲述" : "点击 开始畅聊"}
+                    <Mic className="h-7 w-7" />
+                    {recordMode === "hold" ? "按住说话" : "开始录音"}
                   </button>
                 </div>
               )}
@@ -1103,9 +1106,9 @@ function Index() {
                 <div className="flex justify-center">
                   <button
                     onClick={stopAutoRecord}
-                    className="flex min-h-[56px] items-center justify-center gap-2 rounded-xl bg-[#241F1C] px-6 py-0 text-xl font-bold text-[#FFF7D6] shadow-md transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                    className="flex min-h-[64px] min-w-[240px] items-center justify-center gap-3 rounded-2xl bg-[#241F1C] px-8 py-0 text-2xl font-bold text-[#FFF7D6] shadow-md transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                   >
-                    <Square className="h-6 w-6" />
+                    <Square className="h-7 w-7" />
                     讲完了
                   </button>
                 </div>
@@ -1120,9 +1123,9 @@ function Index() {
                       e.preventDefault();
                       stopManualRecord();
                     }}
-                    className="flex min-h-[58px] items-center justify-center gap-2 rounded-xl bg-[#241F1C] px-6 py-0 text-xl font-bold text-[#FFF7D6] shadow-md cursor-pointer animate-pulse"
+                    className="flex min-h-[64px] min-w-[240px] items-center justify-center gap-3 rounded-2xl bg-[#241F1C] px-8 py-0 text-2xl font-bold text-[#FFF7D6] shadow-md cursor-pointer animate-pulse"
                   >
-                    <Mic className="h-6 w-6 text-[#FFF7D6]" />
+                    <Mic className="h-7 w-7 text-[#FFF7D6]" />
                     录音中，松开发送...
                   </div>
                 </div>
@@ -1132,9 +1135,9 @@ function Index() {
                 <div className="flex justify-center">
                   <button
                     onClick={stopAll}
-                    className="flex min-h-[56px] items-center justify-center gap-2 rounded-xl bg-[#241F1C] px-6 py-0 text-xl font-bold text-[#FFF7D6] shadow-md transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                    className="flex min-h-[64px] min-w-[240px] items-center justify-center gap-3 rounded-2xl bg-[#241F1C] px-8 py-0 text-2xl font-bold text-[#FFF7D6] shadow-md transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                   >
-                    <Square className="h-6 w-6" />
+                    <Square className="h-7 w-7" />
                     停止播放
                   </button>
                 </div>
@@ -1142,8 +1145,8 @@ function Index() {
 
               {convoState === "aiThinking" && (
                 <div className="flex justify-center opacity-50 pointer-events-none">
-                  <div className="flex min-h-[58px] items-center gap-2 rounded-xl border border-[#E9D78F] bg-[#F8E8B2] px-7 py-0 text-xl font-bold text-[#6B5A2A] shadow-[0_8px_18px_rgba(160,120,30,0.1)]">
-                    <Sparkles className="h-6 w-6 animate-spin" />
+                  <div className="flex min-h-[64px] min-w-[240px] items-center justify-center gap-3 rounded-2xl border border-[#E9D78F] bg-[#F8E8B2] px-8 py-0 text-2xl font-bold text-[#6B5A2A] shadow-[0_8px_18px_rgba(160,120,30,0.1)]">
+                    <Sparkles className="h-7 w-7 animate-spin" />
                     思考中...
                   </div>
                 </div>

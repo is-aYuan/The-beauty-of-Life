@@ -22,7 +22,6 @@ export type ServerEntryGuidance = {
 export type EntryGuidance = {
   firstTimeUser: boolean;
   storyPrompt: string;
-  idleStatus: string;
   speechText: string;
   shouldAutoSpeak: boolean;
   topicId: string;

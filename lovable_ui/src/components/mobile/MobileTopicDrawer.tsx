@@ -44,13 +44,11 @@ export function MobileTopicDrawer({
   }
 
   const currentTopicSummary = (
-    <span className="min-w-0">
-      <span className="block text-xs font-bold text-stone-500">当前主题</span>
-      <span className="mt-0.5 flex min-w-0 items-center gap-2">
-        <span className="truncate text-lg font-black text-stone-900">{currentTopic.title}</span>
-        <span className="shrink-0 rounded-full bg-amber-200 px-2 py-0.5 text-xs font-black text-stone-800">
-          {currentProgress}%
-        </span>
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="shrink-0 text-sm font-bold text-stone-500">聊天主题：</span>
+      <span className="truncate text-lg font-black text-stone-900">{currentTopic.title}</span>
+      <span className="shrink-0 rounded-full bg-amber-200 px-2 py-0.5 text-xs font-black text-stone-800">
+        {currentProgress}%
       </span>
     </span>
   );
@@ -62,7 +60,7 @@ export function MobileTopicDrawer({
       }`}
     >
       {expanded ? (
-        <div className="grid w-full grid-cols-1 gap-3 px-4 py-3 text-left">
+        <div className="grid min-h-[52px] w-full grid-cols-1 items-center px-4 py-2 text-left">
           {currentTopicSummary}
         </div>
       ) : (
@@ -71,7 +69,7 @@ export function MobileTopicDrawer({
           aria-expanded={expanded}
           disabled={disabled}
           onClick={onToggle}
-          className="grid w-full grid-cols-[1fr_auto] items-center gap-3 px-4 py-3 text-left disabled:opacity-70"
+          className="grid min-h-[52px] w-full grid-cols-[1fr_auto] items-center gap-3 px-4 py-2 text-left disabled:opacity-70"
         >
           {currentTopicSummary}
           <span className="flex items-center gap-1 rounded-full bg-white px-3 py-2 text-sm font-black text-stone-700 shadow-sm ring-1 ring-amber-100">

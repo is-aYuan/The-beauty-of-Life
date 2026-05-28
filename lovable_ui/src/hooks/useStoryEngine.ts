@@ -882,7 +882,7 @@ export function useStoryEngine() {
     sendInputModeToServer("voice");
   };
 
-  // 模块：录音可视化循环。桌上畅聊只由“讲完了”结束，循环不再用静音截断用户。
+  // 模块：录音可视化循环。录音上传只由“讲完了”结束，循环不再用静音截断用户。
   const startVADLoop = useCallback(() => {
     if (!analyserNodeRef.current) return;
     const analyser = analyserNodeRef.current;

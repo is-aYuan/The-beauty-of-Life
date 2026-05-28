@@ -56,9 +56,11 @@ test('frontend exposes text input mode and sends typed messages through websocke
     assert.match(engineSource, /ignoreIncomingAudioRef/);
     assert.match(routeSource, /type RecordMode = "hold" \| "table" \| "text"/);
     assert.match(routeSource, /长按说话/);
-    assert.match(routeSource, /桌上畅聊/);
+    assert.match(routeSource, /录音上传/);
     assert.match(routeSource, /打字输入/);
+    assert.doesNotMatch(routeSource, /桌上畅聊/);
     assert.match(routeSource, /TextInputComposer/);
+    assert.match(recorderSource, /录音上传/);
     assert.match(recorderSource, /打字输入/);
     assert.match(recorderSource, /TextInputComposer/);
 });
@@ -75,8 +77,19 @@ test('text input mode uses a large single input frame without an outer shadow bo
 test('mobile recorder replaces voice idle copy when text input is selected', () => {
     const source = fs.readFileSync(recorderPath, 'utf8');
 
-    assert.match(source, /textIdleStatus/);
+    assert.match(source, /showStatusLine/);
     assert.match(source, /recordMode === "text"/);
-    assert.match(source, /打字输入，接着上次的话题继续讲/);
-    assert.match(source, /打字输入，像聊天一样讲/);
+    assert.match(source, /placeholder="打字讲述您的故事"/);
+    assert.doesNotMatch(source, /打字输入，接着上次的话题继续讲/);
+    assert.doesNotMatch(source, /打字输入，像聊天一样讲/);
+});
+
+test('recorder controls hide idle guidance copy for every idle input mode', () => {
+    const routeSource = fs.readFileSync(routePath, 'utf8');
+    const recorderSource = fs.readFileSync(recorderPath, 'utf8');
+
+    assert.match(routeSource, /const showDesktopStatusLine = convoState !== "idle" \|\| networkStatus === "offline"/);
+    assert.match(recorderSource, /const showStatusLine = convoState !== "idle" \|\| offline \|\| \(recordMode !== "text" && !!recorderError\)/);
+    assert.doesNotMatch(routeSource, /entryGuidance\.idleStatus/);
+    assert.doesNotMatch(recorderSource, /\{idleStatus\}/);
 });
