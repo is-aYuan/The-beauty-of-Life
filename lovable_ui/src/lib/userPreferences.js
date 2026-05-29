@@ -9,9 +9,10 @@ export const SPEECH_RATE_PRESETS = {
 };
 
 export const FONT_SCALE_PRESETS = {
-  normal: 1,
-  large: 1.12,
-  extraLarge: 1.25,
+  small: 0.5,
+  normal: 0.85,
+  large: 1.25,
+  extraLarge: 1.5,
 };
 
 export const DEFAULT_USER_PREFERENCES = Object.freeze({
@@ -22,7 +23,7 @@ export const DEFAULT_USER_PREFERENCES = Object.freeze({
 });
 
 export const SPEECH_RATE_RANGE = Object.freeze({ min: -2, max: 2, step: 0.01 });
-export const FONT_SCALE_RANGE = Object.freeze({ min: 1, max: 1.35, step: 0.01 });
+export const FONT_SCALE_RANGE = Object.freeze({ min: 0.5, max: 1.5, step: 0.05 });
 
 function roundToTwo(value) {
   return Math.round(value * 100) / 100;
@@ -38,30 +39,64 @@ function normalizePreset(value, presets, fallback = "normal") {
   return Object.prototype.hasOwnProperty.call(presets, value) ? value : fallback;
 }
 
+export function getFontSizePresetByScale(fontScale) {
+  const scale = clampNumber(fontScale, FONT_SCALE_RANGE.min, FONT_SCALE_RANGE.max);
+  if (scale === null) return null;
+
+  const matched = Object.entries(FONT_SCALE_PRESETS).find(([, presetScale]) => presetScale === scale);
+  return matched ? matched[0] : null;
+}
+
+function normalizeFontSizePreference(input = {}) {
+  if (input.fontSizePreset === "custom") {
+    const customScale = clampNumber(input.fontScale, FONT_SCALE_RANGE.min, FONT_SCALE_RANGE.max);
+    if (customScale !== null) {
+      const matchedPreset = getFontSizePresetByScale(customScale);
+      if (matchedPreset) {
+        return { fontSizePreset: matchedPreset, fontScale: FONT_SCALE_PRESETS[matchedPreset] };
+      }
+      return { fontSizePreset: "custom", fontScale: customScale };
+    }
+    return {
+      fontSizePreset: DEFAULT_USER_PREFERENCES.fontSizePreset,
+      fontScale: DEFAULT_USER_PREFERENCES.fontScale,
+    };
+  }
+
+  if (Object.prototype.hasOwnProperty.call(FONT_SCALE_PRESETS, input.fontSizePreset)) {
+    return {
+      fontSizePreset: input.fontSizePreset,
+      fontScale: FONT_SCALE_PRESETS[input.fontSizePreset],
+    };
+  }
+
+  return {
+    fontSizePreset: DEFAULT_USER_PREFERENCES.fontSizePreset,
+    fontScale: DEFAULT_USER_PREFERENCES.fontScale,
+  };
+}
+
 function getBrowserStorage() {
   if (typeof window === "undefined") return null;
   return window.localStorage;
 }
 
 export function normalizeUserPreferences(input = {}) {
-  const speechRatePreset = normalizePreset(input.speechRatePreset, SPEECH_RATE_PRESETS);
-  const fontSizePreset = normalizePreset(input.fontSizePreset, FONT_SCALE_PRESETS);
+  const source = input || {};
+  const speechRatePreset = normalizePreset(source.speechRatePreset, SPEECH_RATE_PRESETS);
   const speechRate = speechRatePreset === "custom"
-    ? clampNumber(input.speechRate, SPEECH_RATE_RANGE.min, SPEECH_RATE_RANGE.max)
+    ? clampNumber(source.speechRate, SPEECH_RATE_RANGE.min, SPEECH_RATE_RANGE.max)
     : SPEECH_RATE_PRESETS[speechRatePreset];
-  const fontScale = fontSizePreset === "custom"
-    ? clampNumber(input.fontScale, FONT_SCALE_RANGE.min, FONT_SCALE_RANGE.max)
-    : FONT_SCALE_PRESETS[fontSizePreset];
+  const fontPreference = normalizeFontSizePreference(source);
 
-  if (speechRate === null || fontScale === null) {
+  if (speechRate === null) {
     return { ...DEFAULT_USER_PREFERENCES };
   }
 
   return {
     speechRatePreset,
     speechRate,
-    fontSizePreset,
-    fontScale,
+    ...fontPreference,
   };
 }
 

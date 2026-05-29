@@ -9,20 +9,20 @@ import {
   UsersRound,
   Settings,
   BarChart3,
-  Bell,
-  Search,
   X,
-  Trash2,
   Sparkles,
   LogOut,
   Clock,
-  Heart,
   Loader2,
-  Download,
 } from "lucide-react";
 import { TopicProgressPanel } from "../components/admin/TopicProgressPanel";
 import { BIOGRAPHY_STYLE_OPTIONS, DEFAULT_BIOGRAPHY_STYLE_ID } from "../lib/biographyStyles.js";
 import { FamilyVoicePanel } from "../components/admin/FamilyVoicePanel";
+import { UsageCostPanel, type AdminUsage } from "../components/admin/UsageCostPanel";
+import {
+  AdminUserManagementPanel,
+  type AdminUser,
+} from "../components/admin/AdminUserManagementPanel";
 import { getRuntimeConfig } from "../lib/runtimeConfig.js";
 import type { TopicProfile } from "../lib/biographyTopics";
 
@@ -30,22 +30,15 @@ export const Route = createFileRoute("/admin")({
   component: AdminPage,
 });
 
-type AdminUser = {
-  id: string;
-  name: string;
-  phone: string;
-  age: number;
-  sessions: number;
-  conversations: number;
-  summaries: number;
-};
-
 const NAV = [
-  { id: "dashboard", label: "数据概览", icon: LayoutDashboard, active: true },
+  { id: "dashboard", label: "数据概览", icon: LayoutDashboard },
+  { id: "costs", label: "成本监控", icon: BarChart3 },
   { id: "users", label: "用户管理", icon: UsersRound },
   { id: "analytics", label: "数据分析", icon: BarChart3 },
   { id: "settings", label: "系统设置", icon: Settings },
-];
+] as const;
+
+type AdminViewId = (typeof NAV)[number]["id"];
 
 const TABS = [
   { id: "chat", label: "对话记录" },
@@ -77,6 +70,10 @@ function formatTime(isoStr?: string) {
   });
 }
 
+function formatAdminAge(age: AdminUser["age"]) {
+  return age ? `${age} 岁` : "- 岁";
+}
+
 function AdminPage() {
   const [token, setToken] = useState(getStoredAdminToken);
   const [phone, setPhone] = useState("");
@@ -91,6 +88,8 @@ function AdminPage() {
   });
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [selected, setSelected] = useState<AdminUser | null>(null);
+  const [activeView, setActiveView] = useState<AdminViewId>("dashboard");
+  const [usage, setUsage] = useState<AdminUsage | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -132,23 +131,30 @@ function AdminPage() {
 
   const loadData = async () => {
     try {
-      const [statsRes, usersRes] = await Promise.all([
+      const [statsRes, usersRes, usageRes] = await Promise.all([
         authFetch(`${API_BASE}/api/admin/stats`),
         authFetch(`${API_BASE}/api/admin/users`),
+        authFetch(`${API_BASE}/api/admin/usage?range=7d`),
       ]);
       const statsData = await statsRes.json();
       const usersData = await usersRes.json();
+      const usageData = await usageRes.json();
 
       setStats(statsData);
+      setUsage(usageData);
       setUsers(
         usersData.map((u: any) => ({
           id: u._id,
           name: u.name || "未知",
           phone: u.phone || "-",
-          age: u.age || "-",
+          age: u.age ?? null,
+          status: u.status || "active",
           sessions: u.sessionCount || 0,
           conversations: u.conversationCount || 0,
           summaries: u.summaryCount || 0,
+          createdAt: u.createdAt || null,
+          updatedAt: u.updatedAt || null,
+          lastActiveAt: u.lastActiveAt || null,
         })),
       );
     } catch (err) {
@@ -244,6 +250,29 @@ function AdminPage() {
     },
   ];
 
+  const activeViewMeta = {
+    dashboard: {
+      title: "数据概览",
+      description: "实时掌握所有老人的故事记忆进展。",
+    },
+    costs: {
+      title: "成本监控",
+      description: "按模型、语音能力和业务功能追踪 API 用量与预估成本。",
+    },
+    users: {
+      title: "用户管理",
+      description: "对长辈账号进行新增、查询、编辑和删除。",
+    },
+    analytics: {
+      title: "数据分析",
+      description: "分析用户访谈质量、内容沉淀和生成转化。",
+    },
+    settings: {
+      title: "系统设置",
+      description: "管理后台系统级配置。",
+    },
+  }[activeView];
+
   return (
     <div className="min-h-screen bg-stone-50 text-stone-800">
       {/* Top Navbar */}
@@ -277,8 +306,9 @@ function AdminPage() {
               return (
                 <button
                   key={item.id}
+                  onClick={() => setActiveView(item.id)}
                   className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold transition-colors ${
-                    item.active
+                    activeView === item.id
                       ? "bg-amber-50 text-amber-700"
                       : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"
                   }`}
@@ -292,103 +322,130 @@ function AdminPage() {
         </aside>
 
         {/* Main */}
-        <main className="flex-1 p-8">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-stone-900">数据概览</h1>
-              <p className="mt-1 text-sm text-stone-500">实时掌握所有老人的故事记忆进展。</p>
+        <main className={activeView === "users" ? "flex-1 px-8 pb-8 pt-0" : "flex-1 p-8"}>
+          {activeView !== "users" && (
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-stone-900">
+                  {activeViewMeta.title}
+                </h1>
+                <p className="mt-1 text-sm text-stone-500">
+                  {activeViewMeta.description}
+                </p>
+              </div>
+              <button
+                onClick={loadData}
+                className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-600 shadow-sm hover:bg-stone-50"
+              >
+                刷新数据
+              </button>
             </div>
-            <button
-              onClick={loadData}
-              className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-600 shadow-sm hover:bg-stone-50"
-            >
-              刷新数据
-            </button>
-          </div>
+          )}
 
-          {/* Stats */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {dynamicStats.map((s) => {
-              const Icon = s.icon;
-              return (
-                <div
-                  key={s.label}
-                  className="rounded-xl border border-stone-100 bg-white p-6 shadow-sm transition-transform hover:-translate-y-1"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-stone-500">{s.label}</p>
-                      <p className="mt-2 text-3xl font-bold text-stone-900">{s.value}</p>
-                    </div>
+          {activeView === "costs" ? (
+            <UsageCostPanel usage={usage} loading={!usage} />
+          ) : activeView === "users" ? (
+            <div className="-mx-8">
+              <AdminUserManagementPanel
+                users={users}
+                apiBase={API_BASE}
+                authFetch={authFetch}
+                onRefresh={loadData}
+                onViewUser={setSelected}
+              />
+            </div>
+          ) : activeView === "dashboard" ? (
+            <>
+              {/* Stats */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {dynamicStats.map((s) => {
+                  const Icon = s.icon;
+                  return (
                     <div
-                      className={`flex h-12 w-12 items-center justify-center rounded-xl ${s.color}`}
+                      key={s.label}
+                      className="rounded-xl border border-stone-100 bg-white p-6 shadow-sm transition-transform hover:-translate-y-1"
                     >
-                      <Icon className="h-6 w-6" />
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-stone-500">{s.label}</p>
+                          <p className="mt-2 text-3xl font-bold text-stone-900">{s.value}</p>
+                        </div>
+                        <div
+                          className={`flex h-12 w-12 items-center justify-center rounded-xl ${s.color}`}
+                        >
+                          <Icon className="h-6 w-6" />
+                        </div>
+                      </div>
                     </div>
+                  );
+                })}
+              </div>
+
+              {/* Users Table */}
+              <div className="mt-8 rounded-xl border border-stone-100 bg-white shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between border-b border-stone-100 bg-stone-50/50 px-6 py-5">
+                  <div>
+                    <h2 className="text-lg font-bold text-stone-800">注册用户列表</h2>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* Users Table */}
-          <div className="mt-8 rounded-xl border border-stone-100 bg-white shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between border-b border-stone-100 bg-stone-50/50 px-6 py-5">
-              <div>
-                <h2 className="text-lg font-bold text-stone-800">注册用户列表</h2>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-stone-50/80 text-xs uppercase tracking-wider text-stone-500">
-                  <tr>
-                    <th className="px-6 py-3 font-semibold">长辈姓名</th>
-                    <th className="px-6 py-3 font-semibold">联系手机</th>
-                    <th className="px-6 py-3 font-semibold">年龄</th>
-                    <th className="px-6 py-3 font-semibold">登录会话</th>
-                    <th className="px-6 py-3 font-semibold">对话轮数</th>
-                    <th className="px-6 py-3 font-semibold">摘要条数</th>
-                    <th className="px-6 py-3 text-right font-semibold">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100 bg-white">
-                  {users.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center text-stone-500">
-                        没有数据...
-                      </td>
-                    </tr>
-                  ) : (
-                    users.map((u) => (
-                      <tr key={u.id} className="transition-colors hover:bg-stone-50/80">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-sm font-bold text-amber-700">
-                              {u.name.charAt(0)}
-                            </div>
-                            <span className="font-bold text-stone-900">{u.name}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 font-medium text-stone-600">{u.phone}</td>
-                        <td className="px-6 py-4 text-stone-600">{u.age} 岁</td>
-                        <td className="px-6 py-4 text-stone-600">{u.sessions} 次</td>
-                        <td className="px-6 py-4 text-stone-600">{u.conversations}</td>
-                        <td className="px-6 py-4 text-stone-600">{u.summaries}</td>
-                        <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => setSelected(u)}
-                            className="rounded-lg bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 transition-colors hover:bg-amber-100"
-                          >
-                            查看详情
-                          </button>
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-stone-50/80 text-xs uppercase tracking-wider text-stone-500">
+                      <tr>
+                        <th className="px-6 py-3 font-semibold">长辈姓名</th>
+                        <th className="px-6 py-3 font-semibold">联系手机</th>
+                        <th className="px-6 py-3 font-semibold">年龄</th>
+                        <th className="px-6 py-3 font-semibold">登录会话</th>
+                        <th className="px-6 py-3 font-semibold">对话轮数</th>
+                        <th className="px-6 py-3 font-semibold">摘要条数</th>
+                        <th className="px-6 py-3 text-right font-semibold">操作</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100 bg-white">
+                      {users.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-6 py-12 text-center text-stone-500">
+                            没有数据...
+                          </td>
+                        </tr>
+                      ) : (
+                        users.map((u) => (
+                          <tr key={u.id} className="transition-colors hover:bg-stone-50/80">
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-sm font-bold text-amber-700">
+                                  {u.name.charAt(0)}
+                                </div>
+                                <span className="font-bold text-stone-900">{u.name}</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 font-medium text-stone-600">{u.phone}</td>
+                            <td className="px-6 py-4 text-stone-600">{formatAdminAge(u.age)}</td>
+                            <td className="px-6 py-4 text-stone-600">{u.sessions} 次</td>
+                            <td className="px-6 py-4 text-stone-600">{u.conversations}</td>
+                            <td className="px-6 py-4 text-stone-600">{u.summaries}</td>
+                            <td className="px-6 py-4 text-right">
+                              <button
+                                onClick={() => setSelected(u)}
+                                className="rounded-lg bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 transition-colors hover:bg-amber-100"
+                              >
+                                查看详情
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-xl border border-dashed border-stone-200 bg-white p-12 text-center text-stone-500">
+              <p className="text-base font-bold text-stone-700">模块建设中</p>
+              <p className="mt-2 text-sm">当前先完成用户管理、成本监控和数据概览。</p>
             </div>
-          </div>
+          )}
         </main>
       </div>
 
@@ -448,26 +505,6 @@ function UserDetailModal({
       });
   }, [activeTab, user.id]);
 
-  const handleDelete = async () => {
-    if (!confirm(`确定要删除长辈 "${user.name}" 及其所有记录吗？\n这是危险操作不可撤销！`)) return;
-    try {
-      const res = await authFetch(`${API_BASE}/api/admin/user/${user.id}`, { method: "DELETE" });
-      const json = await res.json();
-      if (json.success) {
-        alert(
-          `删除成功！\n` +
-            `对话 ${json.deletedConversations || 0} 条，摘要 ${json.deletedSummaries || 0} 条，` +
-            `记忆档案 ${json.deletedMemoryProfiles || 0} 条，主题档案 ${json.deletedTopicProfiles || 0} 条，` +
-            `自传 ${json.deletedBiographies || 0} 条，会话 ${json.deletedSessions || 0} 条。\n` +
-            `本地音频：${json.deletedAudioDir ? "已清理" : "无本地目录"}`,
-        );
-        onClose();
-      } else alert("删除失败: " + json.error);
-    } catch {
-      alert("网络错误");
-    }
-  };
-
   const handleGenerateBook = async () => {
     if (!confirm(`确定要为 "${user.name}" 立即生成排版自传吗？`)) return;
     setBioGenerating(true);
@@ -513,7 +550,7 @@ function UserDetailModal({
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-sm font-medium text-stone-500">{user.phone}</span>
                 <span className="text-stone-300">•</span>
-                <span className="text-sm font-medium text-stone-500">{user.age} 岁</span>
+                <span className="text-sm font-medium text-stone-500">{formatAdminAge(user.age)}</span>
               </div>
             </div>
           </div>
@@ -718,13 +755,7 @@ function UserDetailModal({
         </div>
 
         {/* Footer actions */}
-        <div className="flex items-center justify-between border-t border-stone-100 bg-stone-50 px-8 py-5">
-          <button
-            onClick={handleDelete}
-            className="flex items-center gap-2 rounded-xl bg-white border border-red-200 px-5 py-2.5 text-sm font-bold text-red-600 transition-colors hover:bg-red-50"
-          >
-            <Trash2 className="h-4 w-4" /> 删除测试账号
-          </button>
+        <div className="flex items-center justify-end border-t border-stone-100 bg-stone-50 px-8 py-5">
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-sm font-bold text-stone-600">
               文风

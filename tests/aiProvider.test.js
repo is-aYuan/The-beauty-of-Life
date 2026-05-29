@@ -19,7 +19,14 @@ test('Hunyuan provider keeps the existing Tencent message shape and parameters',
             hunyuanClient: {
                 async ChatCompletions(params) {
                     receivedParams = params;
-                    return { Choices: [{ Message: { Content: '混元回复' } }] };
+                    return {
+                        Choices: [{ Message: { Content: '混元回复' } }],
+                        Usage: {
+                            PromptTokens: 12,
+                            CompletionTokens: 8,
+                            TotalTokens: 20,
+                        },
+                    };
                 },
             },
         },
@@ -31,7 +38,16 @@ test('Hunyuan provider keeps the existing Tencent message shape and parameters',
         topP: 0.9,
     });
 
-    assert.equal(reply, '混元回复');
+    assert.deepEqual(reply, {
+        text: '混元回复',
+        usage: {
+            inputTokens: 12,
+            outputTokens: 8,
+            totalTokens: 20,
+        },
+        provider: 'hunyuan',
+        model: 'hunyuan-test',
+    });
     assert.deepEqual(receivedParams, {
         Model: 'hunyuan-test',
         Messages: [{ Role: 'user', Content: '你好' }],
@@ -72,7 +88,15 @@ test('Doubao Ark provider calls the configured ep endpoint through an OpenAI-com
                     completions: {
                         async create(params) {
                             receivedParams = params;
-                            return { choices: [{ message: { content: '豆包回复' } }] };
+                            return {
+                                choices: [{ message: { content: '豆包回复' } }],
+                                usage: {
+                                    prompt_tokens: 10,
+                                    prompt_cache_hit_tokens: 6,
+                                    completion_tokens: 5,
+                                    total_tokens: 15,
+                                },
+                            };
                         },
                     },
                 },
@@ -86,7 +110,17 @@ test('Doubao Ark provider calls the configured ep endpoint through an OpenAI-com
         topP: 0.9,
     });
 
-    assert.equal(reply, '豆包回复');
+    assert.deepEqual(reply, {
+        text: '豆包回复',
+        usage: {
+            inputTokens: 10,
+            cachedInputTokens: 6,
+            outputTokens: 5,
+            totalTokens: 15,
+        },
+        provider: 'doubao_ark',
+        model: 'ep-123',
+    });
     assert.deepEqual(receivedParams, {
         model: 'ep-123',
         messages: [{ role: 'user', content: '你好' }],

@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent, type SyntheticEvent } from "react";
 import {
   Mic,
   Bot,
@@ -14,6 +14,8 @@ import {
   ArrowRight,
   RefreshCw,
   Download,
+  AlertTriangle,
+  Trash2,
 } from "lucide-react";
 import { useChatAutoScroll } from "../lib/chatAutoScroll";
 import {
@@ -31,7 +33,12 @@ import {
   type BiographyStyleId,
 } from "../lib/biographyStyles.js";
 import { buildMemoirTitle } from "../lib/memoirTitle.js";
-import { useStoryEngine } from "../hooks/useStoryEngine";
+import {
+  useStoryEngine,
+  type AccountDeletionInput,
+  type User,
+  type UserProfileUpdate,
+} from "../hooks/useStoryEngine";
 import { useIsMobile } from "../hooks/use-mobile";
 import { FamilyConnectionPanel } from "../components/FamilyConnectionPanel";
 import { MobileAppShell } from "../components/mobile/MobileAppShell";
@@ -42,6 +49,7 @@ import {
   FONT_SCALE_RANGE,
   SPEECH_RATE_PRESETS,
   SPEECH_RATE_RANGE,
+  getFontSizePresetByScale,
   speechRateToPreviewRate,
   type FontSizePreset,
   type SpeechRatePreset,
@@ -84,6 +92,7 @@ const SPEECH_RATE_OPTIONS: { id: Exclude<SpeechRatePreset, "custom">; label: str
 ];
 
 const FONT_SIZE_OPTIONS: { id: Exclude<FontSizePreset, "custom">; label: string }[] = [
+  { id: "small", label: "小" },
   { id: "normal", label: "标准" },
   { id: "large", label: "大" },
   { id: "extraLarge", label: "特大" },
@@ -139,7 +148,7 @@ function SettingsSegment<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="grid grid-cols-3 gap-3">
+    <div className={`grid ${options.length === 4 ? "grid-cols-4" : "grid-cols-3"} gap-3`}>
       {options.map((option) => {
         const active = value === option.id;
         return (
@@ -162,14 +171,40 @@ function SettingsSegment<T extends string>({
 }
 
 function SettingsPanel({
+  user,
   preferences,
   onChange,
+  onUpdateProfile,
+  onDeleteAccount,
 }: {
+  user: User;
   preferences: UserPreferences;
   onChange: (updates: Partial<UserPreferences>) => void;
+  onUpdateProfile: (updates: UserProfileUpdate) => Promise<{
+    success: boolean;
+    message?: string;
+  }>;
+  onDeleteAccount: (input: AccountDeletionInput) => Promise<{
+    success: boolean;
+    message?: string;
+  }>;
 }) {
   const [previewSpeaking, setPreviewSpeaking] = useState(false);
+  const [profileName, setProfileName] = useState(user.name || "");
+  const [profileAge, setProfileAge] = useState(user.age == null ? "" : String(user.age));
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState("");
+  const [profileMessageTone, setProfileMessageTone] = useState<"success" | "error">("success");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState("");
+  const [draftFontScale, setDraftFontScale] = useState(preferences.fontScale);
+  const [isDraftingFontScale, setIsDraftingFontScale] = useState(false);
+  const draftFontScaleRef = useRef(preferences.fontScale);
   const previewText = "这是预览文字：我会陪您慢慢讲，把故事整理成回忆录。";
+  const canSubmitDeletion =
+    deletePassword.trim().length > 0 && deleteConfirmText.trim() === "确认注销";
   const speechRateLabel =
     preferences.speechRate <= -1.75
       ? "最慢"
@@ -178,6 +213,77 @@ function SettingsPanel({
         : preferences.speechRate < 1.25
           ? "标准"
           : "偏快";
+  const activeFontSizePreset = getFontSizePresetByScale(draftFontScale);
+
+  useEffect(() => {
+    setProfileName(user.name || "");
+    setProfileAge(user.age == null ? "" : String(user.age));
+    setProfileMessage("");
+  }, [user.userId, user.name, user.age]);
+
+  // 模块：字体大小滑块草稿。拖动时只更新预览，松手后再保存，避免整页缩放打断滑块坐标。
+  useEffect(() => {
+    if (!isDraftingFontScale) {
+      setDraftFontScale(preferences.fontScale);
+      draftFontScaleRef.current = preferences.fontScale;
+    }
+  }, [isDraftingFontScale, preferences.fontScale]);
+
+  const handleDraftFontScaleChange = (value: number) => {
+    draftFontScaleRef.current = value;
+    setDraftFontScale(value);
+    setIsDraftingFontScale(true);
+  };
+
+  const commitDraftFontScale = (fontScale = draftFontScaleRef.current) => {
+    const nextFontScale = fontScale;
+    setIsDraftingFontScale(false);
+    draftFontScaleRef.current = nextFontScale;
+    setDraftFontScale(nextFontScale);
+    onChange({
+      fontSizePreset: getFontSizePresetByScale(nextFontScale) ?? "custom",
+      fontScale: nextFontScale,
+    });
+  };
+
+  const commitDraftFontScaleFromInput = (event: SyntheticEvent<HTMLInputElement>) => {
+    commitDraftFontScale(Number(event.currentTarget.value));
+  };
+
+  const handleProfileSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setProfileSaving(true);
+    setProfileMessage("");
+    const result = await onUpdateProfile({
+      name: profileName,
+      age: profileAge,
+    });
+    setProfileSaving(false);
+    if (result.success) {
+      setProfileMessageTone("success");
+      setProfileMessage("个人信息已保存");
+    } else {
+      setProfileMessageTone("error");
+      setProfileMessage(result.message || "资料保存失败，请稍后再试");
+    }
+  };
+
+  const handleDeleteAccountSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canSubmitDeletion || deleteSubmitting) return;
+
+    setDeleteSubmitting(true);
+    setDeleteMessage("");
+    const result = await onDeleteAccount({
+      password: deletePassword,
+      confirmText: deleteConfirmText,
+    });
+    setDeleteSubmitting(false);
+
+    if (!result.success) {
+      setDeleteMessage(result.message || "账号注销失败，请稍后再试");
+    }
+  };
 
   const speakPreview = () => {
     if (!("speechSynthesis" in window)) return;
@@ -199,6 +305,62 @@ function SettingsPanel({
       </header>
 
       <div className="space-y-6 py-6">
+        <section className="rounded-2xl bg-white/85 p-6 shadow-sm ring-1 ring-amber-100">
+          <div className="mb-4 flex items-center gap-3">
+            <SettingsIcon className="h-8 w-8 text-amber-700" />
+            <h3 className="text-2xl font-bold text-stone-800">个人信息</h3>
+          </div>
+          <form className="space-y-4" onSubmit={handleProfileSubmit}>
+            <label className="block">
+              <span className="mb-2 block text-lg font-bold text-stone-700">姓名</span>
+              <input
+                value={profileName}
+                onChange={(event) => setProfileName(event.target.value)}
+                maxLength={20}
+                className="min-h-14 w-full rounded-xl border border-amber-200 bg-white px-4 text-xl font-bold text-stone-800 outline-none transition-colors focus:border-amber-500"
+                placeholder="请输入姓名"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-lg font-bold text-stone-700">年龄</span>
+              <input
+                value={profileAge}
+                onChange={(event) => setProfileAge(event.target.value)}
+                inputMode="numeric"
+                className="min-h-14 w-full rounded-xl border border-amber-200 bg-white px-4 text-xl font-bold text-stone-800 outline-none transition-colors focus:border-amber-500"
+                placeholder="可不填"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-lg font-bold text-stone-700">手机号</span>
+              <input
+                value={user.phone}
+                readOnly
+                className="min-h-14 w-full rounded-xl border border-stone-200 bg-stone-100 px-4 text-xl font-bold text-stone-500"
+                aria-label="手机号（只读）"
+              />
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                disabled={profileSaving}
+                className="min-h-12 rounded-xl bg-stone-800 px-6 text-lg font-black text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {profileSaving ? "保存中..." : "保存个人信息"}
+              </button>
+              {profileMessage ? (
+                <p
+                  className={`text-base font-bold ${
+                    profileMessageTone === "success" ? "text-emerald-700" : "text-red-600"
+                  }`}
+                >
+                  {profileMessage}
+                </p>
+              ) : null}
+            </div>
+          </form>
+        </section>
+
         <section className="rounded-2xl bg-white/85 p-6 shadow-sm ring-1 ring-amber-100">
           <div className="mb-4 flex items-center gap-3">
             <Volume2 className="h-8 w-8 text-amber-700" />
@@ -253,18 +415,21 @@ function SettingsPanel({
           </div>
           <SettingsSegment
             options={FONT_SIZE_OPTIONS}
-            value={preferences.fontSizePreset}
-            onChange={(preset) =>
+            value={activeFontSizePreset ?? preferences.fontSizePreset}
+            onChange={(preset) => {
+              setIsDraftingFontScale(false);
+              draftFontScaleRef.current = FONT_SCALE_PRESETS[preset];
+              setDraftFontScale(FONT_SCALE_PRESETS[preset]);
               onChange({
                 fontSizePreset: preset,
                 fontScale: FONT_SCALE_PRESETS[preset],
-              })
-            }
+              });
+            }}
           />
           <div className="mt-6">
             <div className="mb-2 flex justify-between text-lg font-semibold text-stone-600">
-              <span>标准</span>
-              <span>{Math.round(preferences.fontScale * 100)}%</span>
+              <span>更小</span>
+              <span>{Math.round(draftFontScale * 100)}%</span>
               <span>更大</span>
             </div>
             <input
@@ -272,13 +437,14 @@ function SettingsPanel({
               min={FONT_SCALE_RANGE.min}
               max={FONT_SCALE_RANGE.max}
               step={FONT_SCALE_RANGE.step}
-              value={preferences.fontScale}
-              onChange={(event) =>
-                onChange({
-                  fontSizePreset: "custom",
-                  fontScale: Number(event.target.value),
-                })
-              }
+              value={draftFontScale}
+              onPointerDown={() => setIsDraftingFontScale(true)}
+              onPointerUp={commitDraftFontScaleFromInput}
+              onMouseUp={commitDraftFontScaleFromInput}
+              onTouchEnd={commitDraftFontScaleFromInput}
+              onBlur={commitDraftFontScaleFromInput}
+              onKeyUp={commitDraftFontScaleFromInput}
+              onChange={(event) => handleDraftFontScaleChange(Number(event.currentTarget.value))}
               className="h-3 w-full accent-amber-700"
               aria-label="字体大小微调"
             />
@@ -288,10 +454,59 @@ function SettingsPanel({
         <section className="rounded-2xl bg-blue-50/70 p-6 ring-1 ring-blue-100">
           <p
             className="leading-relaxed text-blue-900"
-            style={{ fontSize: `${Math.round(24 * preferences.fontScale)}px` }}
+            style={{ fontSize: `${Math.round(24 * draftFontScale)}px` }}
           >
             {previewText}
           </p>
+        </section>
+
+        <section className="rounded-2xl border border-red-200 bg-red-50/80 p-6 shadow-sm">
+          <div className="mb-4 flex items-start gap-3">
+            <AlertTriangle className="mt-1 h-8 w-8 shrink-0 text-red-600" />
+            <div>
+              <h3 className="text-2xl font-bold text-red-900">注销账号与删除资料</h3>
+              <p className="mt-2 text-base leading-relaxed text-red-800">
+                注销后会删除个人信息、对话记录、回忆库、回忆录、主题进度和本地录音文件，删除后无法恢复。
+              </p>
+            </div>
+          </div>
+          <form className="space-y-4" onSubmit={handleDeleteAccountSubmit}>
+            <label className="block">
+              <span className="mb-2 block text-lg font-bold text-red-900">登录密码</span>
+              <input
+                type="password"
+                value={deletePassword}
+                onChange={(event) => setDeletePassword(event.target.value)}
+                autoComplete="current-password"
+                className="min-h-14 w-full rounded-xl border border-red-200 bg-white px-4 text-xl font-bold text-stone-800 outline-none transition-colors focus:border-red-500"
+                placeholder="请输入登录密码"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-lg font-bold text-red-900">
+                输入“确认注销”
+              </span>
+              <input
+                value={deleteConfirmText}
+                onChange={(event) => setDeleteConfirmText(event.target.value)}
+                className="min-h-14 w-full rounded-xl border border-red-200 bg-white px-4 text-xl font-bold text-stone-800 outline-none transition-colors focus:border-red-500"
+                placeholder="确认注销"
+              />
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                disabled={!canSubmitDeletion || deleteSubmitting}
+                className="flex min-h-12 items-center gap-2 rounded-xl bg-red-700 px-6 text-lg font-black text-white shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Trash2 className="h-5 w-5" />
+                {deleteSubmitting ? "正在注销..." : "确认注销账号"}
+              </button>
+              {deleteMessage ? (
+                <p className="text-base font-bold text-red-700">{deleteMessage}</p>
+              ) : null}
+            </div>
+          </form>
         </section>
       </div>
     </div>
@@ -334,6 +549,8 @@ function Index() {
     downloadBiography,
     activateArchiveRecommendation,
     updateUserPreferences,
+    updateUserProfile,
+    deleteAccount,
   } = useStoryEngine();
 
   const [activeTab, setActiveTab] = useState<Tab>("story");
@@ -391,6 +608,8 @@ function Index() {
   const currentTopic = topicProfile?.topics.find(
     (topic) => topic.id === topicProfile.currentTopicId,
   );
+  // 模块：桌面主题栏呈现。主题选择只服务讲故事流程，其他模块释放右侧空间给主内容。
+  const showDesktopTopicSidebar = activeTab === "story";
   const latestBiography = getLatestBiography(biographies);
   const biographyDecision = buildBiographyGenerationDecision({
     topics: topicProfile?.topics || [],
@@ -635,7 +854,13 @@ function Index() {
         data-mobile-settings
         className="h-full overflow-y-auto px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]"
       >
-        <SettingsPanel preferences={userPreferences} onChange={updateUserPreferences} />
+        <SettingsPanel
+          user={user}
+          preferences={userPreferences}
+          onChange={updateUserPreferences}
+          onUpdateProfile={updateUserProfile}
+          onDeleteAccount={deleteAccount}
+        />
       </div>
     ) : activeTab === "family" ? (
       <div className="h-full overflow-y-auto px-4 py-4">
@@ -852,7 +1077,9 @@ function Index() {
 
       {/* MAIN WORKBENCH */}
       <section
-        className="flex w-[55%] flex-col rounded-3xl bg-amber-50 p-8 relative"
+        className={`flex flex-col rounded-3xl bg-amber-50 p-8 relative ${
+          showDesktopTopicSidebar ? "w-[55%]" : "flex-1"
+        }`}
         style={{ boxShadow: "inset 0 4px 24px rgba(120, 72, 30, 0.18)" }}
       >
         {activeTab === "organizer" ? (
@@ -973,7 +1200,13 @@ function Index() {
             </div>
           </div>
         ) : activeTab === "settings" ? (
-          <SettingsPanel preferences={userPreferences} onChange={updateUserPreferences} />
+          <SettingsPanel
+            user={user}
+            preferences={userPreferences}
+            onChange={updateUserPreferences}
+            onUpdateProfile={updateUserProfile}
+            onDeleteAccount={deleteAccount}
+          />
         ) : activeTab === "family" ? (
           <FamilyConnectionPanel />
         ) : activeTab !== "story" ? (
@@ -1157,55 +1390,60 @@ function Index() {
       </section>
 
       {/* RIGHT SIDEBAR */}
-      <aside className="flex w-[25%] flex-col rounded-3xl bg-amber-100/70 p-5 shadow-md">
-        <div className="mb-4">
-          <p className="text-lg font-semibold text-stone-600">今天想聊哪个主题？</p>
-          <h2 className="mt-1 text-2xl font-bold text-stone-800">传记主题</h2>
-        </div>
+      {showDesktopTopicSidebar && (
+        <aside
+          data-desktop-topic-sidebar
+          className="flex w-[25%] flex-col rounded-3xl bg-amber-100/70 p-5 shadow-md"
+        >
+          <div className="mb-4">
+            <p className="text-lg font-semibold text-stone-600">今天想聊哪个主题？</p>
+            <h2 className="mt-1 text-2xl font-bold text-stone-800">传记主题</h2>
+          </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-          {topicProfile?.topics.map((topic) => {
-            const active = topic.id === topicProfile.currentTopicId;
-            const progress = Math.max(0, Math.min(100, topic.progress || 0));
-            const statusLabel = getTopicStatusLabel(topic.status, progress);
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+            {topicProfile?.topics.map((topic) => {
+              const active = topic.id === topicProfile.currentTopicId;
+              const progress = Math.max(0, Math.min(100, topic.progress || 0));
+              const statusLabel = getTopicStatusLabel(topic.status, progress);
 
-            return (
-              <button
-                key={topic.id}
-                onClick={() => selectTopic(topic.id)}
-                className={`w-full rounded-2xl px-4 py-3 text-left shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] ${
-                  active
-                    ? "bg-amber-300 text-stone-900 ring-2 ring-amber-700/35"
-                    : "bg-amber-50 text-stone-800 hover:bg-amber-100"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="min-w-0 text-lg font-bold leading-snug">{topic.title}</span>
-                  {active && (
-                    <span className="shrink-0 rounded-full bg-stone-800 px-2 py-1 text-xs font-semibold text-amber-50">
-                      正在聊
-                    </span>
-                  )}
-                </div>
-                <div className="mt-3 flex items-center gap-3">
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-stone-300/60">
-                    <div
-                      className={`h-full rounded-full ${
-                        progress >= 85 ? "bg-emerald-500" : "bg-amber-700"
-                      }`}
-                      style={{ width: `${progress}%` }}
-                    />
+              return (
+                <button
+                  key={topic.id}
+                  onClick={() => selectTopic(topic.id)}
+                  className={`w-full rounded-2xl px-4 py-3 text-left shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] ${
+                    active
+                      ? "bg-amber-300 text-stone-900 ring-2 ring-amber-700/35"
+                      : "bg-amber-50 text-stone-800 hover:bg-amber-100"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="min-w-0 text-lg font-bold leading-snug">{topic.title}</span>
+                    {active && (
+                      <span className="shrink-0 rounded-full bg-stone-800 px-2 py-1 text-xs font-semibold text-amber-50">
+                        正在聊
+                      </span>
+                    )}
                   </div>
-                  <span className="w-10 text-right text-sm font-semibold text-stone-700">
-                    {progress}%
-                  </span>
-                </div>
-                <p className="mt-2 text-sm font-medium text-stone-600">{statusLabel}</p>
-              </button>
-            );
-          })}
-        </div>
-      </aside>
+                  <div className="mt-3 flex items-center gap-3">
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-stone-300/60">
+                      <div
+                        className={`h-full rounded-full ${
+                          progress >= 85 ? "bg-emerald-500" : "bg-amber-700"
+                        }`}
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                    <span className="w-10 text-right text-sm font-semibold text-stone-700">
+                      {progress}%
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm font-medium text-stone-600">{statusLabel}</p>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+      )}
 
       {biographyStyleDialog}
       {biographyDownloadDialog}

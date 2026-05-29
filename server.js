@@ -42,6 +42,19 @@ const {
     verifyPassword,
 } = require('./lib/authPassword');
 const {
+    buildPublicUserProfile,
+    normalizeUserProfileUpdate,
+} = require('./lib/userProfile');
+const {
+    buildAdminUserListItem,
+    validateAdminCreateUserInput,
+    validateAdminDeleteUserInput,
+    validateAdminUpdateUserInput,
+} = require('./lib/adminUserManagement');
+const {
+    validateAccountDeletionInput,
+} = require('./lib/accountDeletion');
+const {
     buildArchiveView,
 } = require('./lib/archiveView');
 const {
@@ -108,6 +121,9 @@ const {
     createVoiceProvider,
 } = require('./lib/voice');
 const {
+    createUsageRecorder,
+} = require('./lib/usage/usageRecorder');
+const {
     recognizeLongFormSpeech,
 } = require('./lib/voice/longFormRecognition');
 const {
@@ -129,6 +145,7 @@ const tcbApp = cloudbase.init({
 
 const db = tcbApp.database();
 const _ = db.command; // 数据库操作符
+const usageRecorder = createUsageRecorder({ db });
 console.log('[CloudBase] 云数据库已连接');
 
 // ==================== 腾讯云 SDK 导入 ====================
@@ -530,13 +547,80 @@ async function getUserProfile(userId) {
 }
 
 /**
- * 更新用户资料
+ * 更新用户可编辑资料
+ * 只允许修改姓名和年龄，手机号仍作为登录唯一值保留只读。
  */
-async function updateUserProfile(userId, updates) {
+async function updateUserProfile(userId, input) {
+    const validation = normalizeUserProfileUpdate(input);
+    if (!validation.valid) {
+        return { success: false, message: validation.message };
+    }
+
+    const existing = await getUserProfile(userId);
+    if (!existing || existing.status !== 'active') {
+        return { success: false, message: '用户不存在或已停用' };
+    }
+
     await db.collection('users').doc(userId).update({
-        ...updates,
+        ...validation.value,
         updatedAt: db.serverDate(),
     });
+
+    const updated = {
+        ...existing,
+        ...validation.value,
+    };
+    console.log(`[用户] 资料已更新: ${updated.name} (${updated.phone})`);
+
+    return buildPublicUserProfile(updated);
+}
+
+/**
+ * 管理员新增用户
+ * 复用普通注册的密码散列和手机号唯一校验，但由管理员输入校验先收紧字段。
+ */
+async function createAdminUser(input) {
+    const validation = validateAdminCreateUserInput(input);
+    if (!validation.valid) {
+        return { success: false, message: validation.message };
+    }
+
+    return registerUser(
+        validation.value.phone,
+        validation.value.name,
+        validation.value.age,
+        validation.value.password,
+    );
+}
+
+/**
+ * 管理员编辑用户资料
+ * 第一版只开放姓名和年龄，手机号继续作为登录唯一标识保持只读。
+ */
+async function updateAdminUser(userId, input) {
+    const validation = validateAdminUpdateUserInput(input);
+    if (!validation.valid) {
+        return { success: false, message: validation.message };
+    }
+
+    const existing = await getUserProfile(userId);
+    if (!existing || existing.status !== 'active') {
+        return { success: false, message: '用户不存在或已停用' };
+    }
+
+    await db.collection('users').doc(userId).update({
+        ...validation.value,
+        updatedAt: db.serverDate(),
+    });
+
+    return {
+        success: true,
+        user: buildAdminUserListItem({
+            ...existing,
+            ...validation.value,
+            updatedAt: new Date().toISOString(),
+        }),
+    };
 }
 
 /**
@@ -587,6 +671,33 @@ async function deleteUser(userId) {
         deletedAudioDir: audioResult.deletedAudioDir,
         deletedUser: true,
     };
+}
+
+/**
+ * 注销本人账号
+ * 复用级联删除能力，但在执行前强制校验登录密码和确认文本。
+ */
+async function deleteOwnAccount(userId, input) {
+    const validation = validateAccountDeletionInput(input);
+    if (!validation.valid) {
+        return { success: false, message: validation.message };
+    }
+
+    const existing = await getUserProfile(userId);
+    if (!existing || existing.status !== 'active') {
+        return { success: false, message: '用户不存在或已停用' };
+    }
+
+    if (!existing.passwordHash || !existing.passwordSalt) {
+        return { success: false, message: '请先设置登录密码后再注销账号' };
+    }
+
+    if (!verifyPassword(validation.value.password, existing.passwordHash, existing.passwordSalt)) {
+        return { success: false, message: '密码错误' };
+    }
+
+    const deletion = await deleteUser(userId);
+    return { success: true, ...deletion };
 }
 
 // ==================== 会话管理模块（关联用户） ====================
@@ -736,8 +847,10 @@ async function extractNarrativeSummary(sessionId, userId) {
     console.log(`[摘要] 开始提取会话 ${sessionId} 的叙事摘要（${conversations.length} 轮对话，${sessionWordCount} 字）...`);
 
     try {
+        const summaryModel = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+        const usageStartTime = Date.now();
         const response = await deepseekClient.chat.completions.create({
-            model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+            model: summaryModel,
             messages: [
                 { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
                 {
@@ -750,6 +863,15 @@ async function extractNarrativeSummary(sessionId, userId) {
             ],
             temperature: 0.3,
             response_format: { type: 'json_object' },
+        });
+        await recordOpenAICompatibleUsage({
+            userId,
+            sessionId,
+            provider: 'deepseek',
+            model: summaryModel,
+            operation: 'summary',
+            response,
+            startTime: usageStartTime,
         });
 
         const rawContent = response.choices[0].message.content;
@@ -801,6 +923,15 @@ async function extractNarrativeSummary(sessionId, userId) {
             await updateTopicProfileFromAnalysis(userId, topicAnalysis);
         }
     } catch (err) {
+        await usageRecorder.recordUsage({
+            userId,
+            sessionId,
+            provider: 'deepseek',
+            model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+            operation: 'summary',
+            status: 'failed',
+            errorMessage: err.message || String(err),
+        });
         console.error(`[摘要] DeepSeek 调用失败:`, err.message);
     }
 }
@@ -1028,6 +1159,53 @@ function getAuthHeader(req) {
     return auth.startsWith('Bearer ') ? auth.slice(7) : null;
 }
 
+function mapOpenAICompatibleUsage(usage = {}) {
+    return {
+        inputTokens: usage.prompt_tokens || 0,
+        cachedInputTokens: usage.prompt_cache_hit_tokens || usage.cached_tokens || 0,
+        outputTokens: usage.completion_tokens || 0,
+        totalTokens: usage.total_tokens || 0,
+    };
+}
+
+async function recordOpenAICompatibleUsage({
+    userId = null,
+    sessionId = null,
+    provider,
+    model,
+    operation,
+    response,
+    startTime,
+    status = 'success',
+    errorMessage = '',
+}) {
+    await usageRecorder.recordUsage({
+        userId,
+        sessionId,
+        provider,
+        model,
+        operation,
+        ...mapOpenAICompatibleUsage(response?.usage),
+        status,
+        errorMessage,
+        latencyMs: startTime ? Date.now() - startTime : 0,
+    });
+}
+
+function getVoiceUsageProvider() {
+    return `${voiceProvider.name}_voice`;
+}
+
+function getAsrUsageModel() {
+    if (voiceProvider.name === 'doubao') return PROVIDER_CONFIG.doubaoSpeech.asrResourceId;
+    return 'tencent-sentence-recognition';
+}
+
+function getTtsUsageModel() {
+    if (voiceProvider.name === 'doubao') return PROVIDER_CONFIG.doubaoSpeech.ttsResourceId;
+    return 'tencent-text-to-voice';
+}
+
 async function getAdminStats() {
     const [users, sessions, conversations, summaries] = await Promise.all([
         db.collection('users').count(),
@@ -1053,12 +1231,12 @@ async function getAdminUsers() {
         const convCount = await db.collection('conversations').where({ userId: user._id }).count();
         const summCount = await db.collection('summaries').where({ userId: user._id }).count();
 
-        result.push({
-            ...user,
+        result.push(buildAdminUserListItem(user, {
             sessionCount: sessCount.total || 0,
             conversationCount: convCount.total || 0,
             summaryCount: summCount.total || 0,
-        });
+            lastActiveAt: user.updatedAt || user.createdAt || null,
+        }));
     }
 
     return result;
@@ -1275,8 +1453,10 @@ async function generateBiography(userId, options = {}) {
     // 7. 调用 DeepSeek
     console.log(`[自传] 调用 DeepSeek 撰写中...`);
 
+    const biographyModel = process.env.DEEPSEEK_BIOGRAPHY_MODEL || 'deepseek-v4-pro';
+    const usageStartTime = Date.now();
     const response = await deepseekClient.chat.completions.create({
-        model: process.env.DEEPSEEK_BIOGRAPHY_MODEL || 'deepseek-v4-pro',
+        model: biographyModel,
         messages: [
             { role: 'system', content: BIOGRAPHY_SYSTEM_PROMPT },
             { role: 'user', content: userPrompt },
@@ -1284,6 +1464,14 @@ async function generateBiography(userId, options = {}) {
         temperature: biographyStyle.temperature,
         top_p: biographyStyle.topP,
         response_format: { type: 'json_object' },
+    });
+    await recordOpenAICompatibleUsage({
+        userId,
+        provider: 'deepseek',
+        model: biographyModel,
+        operation: 'biography',
+        response,
+        startTime: usageStartTime,
     });
 
     const rawContent = response.choices[0].message.content;
@@ -1414,6 +1602,26 @@ function parseJsonBody(rawBody) {
     }
 }
 
+function getBearerToken(req) {
+    const header = req.headers.authorization || '';
+    const match = header.match(/^Bearer\s+(.+)$/i);
+    return match ? match[1].trim() : '';
+}
+
+function verifyUserRequest(req, userId) {
+    const token = getBearerToken(req);
+    if (!token) {
+        return { valid: false, message: '请先登录' };
+    }
+
+    const tokenResult = verifyAuthToken(token, AUTH_TOKEN_SECRET);
+    if (!tokenResult.valid || tokenResult.payload.userId !== userId) {
+        return { valid: false, message: '登录已过期，请重新登录' };
+    }
+
+    return { valid: true, authToken: token, payload: tokenResult.payload };
+}
+
 function buildConsentMetadataFromRequest(req, source) {
     return {
         source,
@@ -1449,7 +1657,7 @@ const server = http.createServer(async (req, res) => {
 
     // CORS 头
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
@@ -1560,6 +1768,53 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 用户资料更新：只允许本人修改姓名和年龄，手机号保持只读。
+    if (url.pathname.match(/^\/api\/user\/[^/]+\/profile$/) && req.method === 'POST') {
+        const userId = url.pathname.split('/')[3];
+        const auth = verifyUserRequest(req, userId);
+        if (!auth.valid) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: auth.message }));
+            return;
+        }
+
+        try {
+            const body = parseJsonBody(await getRequestBody(req));
+            const result = await updateUserProfile(userId, body);
+            if (result.success) {
+                result.authToken = auth.authToken;
+            }
+            res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: err.message }));
+        }
+        return;
+    }
+
+    // 账号注销：只允许本人通过登录态、密码和确认文本删除自己的全部资料。
+    if (url.pathname.match(/^\/api\/user\/[^/]+\/delete-account$/) && req.method === 'POST') {
+        const userId = url.pathname.split('/')[3];
+        const auth = verifyUserRequest(req, userId);
+        if (!auth.valid) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: auth.message }));
+            return;
+        }
+
+        try {
+            const body = parseJsonBody(await getRequestBody(req));
+            const result = await deleteOwnAccount(userId, body);
+            res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: err.message }));
+        }
+        return;
+    }
+
     // 用户个性化设置：朗读语速、字体大小
     if (url.pathname.match(/^\/api\/user-preferences\/[^/]+$/) && req.method === 'GET') {
         const userId = url.pathname.split('/').pop();
@@ -1588,17 +1843,10 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // 删除用户及所有关联数据
-    if (url.pathname.startsWith('/api/user/') && req.method === 'DELETE') {
-        const userId = url.pathname.split('/').pop();
-        try {
-            const result = await deleteUser(userId);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, ...result }));
-        } catch (err) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
-        }
+    // 普通用户删除入口必须走账号注销流程，避免裸 DELETE 误删资料。
+    if (url.pathname.match(/^\/api\/user\/[^/]+$/) && req.method === 'DELETE') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: '请使用账号注销流程' }));
         return;
     }
 
@@ -1832,6 +2080,20 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
+        // API 用量与成本监控
+        if (url.pathname === '/api/admin/usage' && req.method === 'GET') {
+            try {
+                const range = url.searchParams.get('range') || '7d';
+                const usage = await usageRecorder.getAdminUsage({ range });
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(usage));
+            } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: err.message }));
+            }
+            return;
+        }
+
         // 系统统计
         if (url.pathname === '/api/admin/stats' && req.method === 'GET') {
             try {
@@ -1858,10 +2120,46 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
+        // 管理员新增用户
+        if (url.pathname === '/api/admin/users' && req.method === 'POST') {
+            try {
+                const body = parseJsonBody(await getRequestBody(req));
+                const result = await createAdminUser(body);
+                res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(result));
+            } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, message: err.message }));
+            }
+            return;
+        }
+
+        // 管理员编辑用户资料
+        const updateAdminUserMatch = url.pathname.match(/^\/api\/admin\/user\/([^/]+)$/);
+        if (updateAdminUserMatch && req.method === 'PATCH') {
+            try {
+                const body = parseJsonBody(await getRequestBody(req));
+                const result = await updateAdminUser(updateAdminUserMatch[1], body);
+                res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(result));
+            } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, message: err.message }));
+            }
+            return;
+        }
+
         // 删除用户及关联数据
         const deleteMatch = url.pathname.match(/^\/api\/admin\/user\/([^/]+)$/);
         if (deleteMatch && req.method === 'DELETE') {
             try {
+                const body = parseJsonBody(await getRequestBody(req));
+                const validation = validateAdminDeleteUserInput(body);
+                if (!validation.valid) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, message: validation.message }));
+                    return;
+                }
                 const result = await deleteUser(deleteMatch[1]);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: true, ...result }));
@@ -2131,7 +2429,10 @@ async function speakEntryGuidance(sessionId, session, entryGuidance) {
     if (!entryGuidance?.shouldAutoSpeak || !entryGuidance.speechText) return;
     if (!shouldSpeakForSession(session)) return;
 
-    const audioData = await synthesizeSpeech(entryGuidance.speechText, session.userPreferences);
+    const audioData = await synthesizeSpeech(entryGuidance.speechText, session.userPreferences, {
+        userId: session.userId,
+        sessionId,
+    });
     if (audioData && session.ws.readyState === 1) {
         session.ws.send(audioData);
         console.log(`[${sessionId}] 入口引导 TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
@@ -2408,6 +2709,7 @@ async function handleMessage(sessionId, session, msg) {
                 event: 'preferences_updated',
                 status: 'ready',
                 preferences: session.userPreferences,
+                syncVersion: msg.syncVersion,
             });
         } catch (err) {
             sendJson(session.ws, {
@@ -2601,7 +2903,10 @@ async function maybePromptTopicTransition(sessionId, session, topicProfile) {
 
     if (!shouldSpeak) return true;
 
-    const audioData = await synthesizeSpeech(prompt.text, session.userPreferences);
+    const audioData = await synthesizeSpeech(prompt.text, session.userPreferences, {
+        userId: session.userId,
+        sessionId,
+    });
     if (audioData) {
         session.ws.send(audioData);
         console.log(`[${sessionId}] 富主题换题提示 TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
@@ -2625,7 +2930,10 @@ async function speakTopicSwitchOpening(sessionId, session, opening) {
 
     if (!shouldSpeak) return true;
 
-    const audioData = await synthesizeSpeech(opening.text, session.userPreferences);
+    const audioData = await synthesizeSpeech(opening.text, session.userPreferences, {
+        userId: session.userId,
+        sessionId,
+    });
     if (audioData) {
         session.ws.send(audioData);
         console.log(`[${sessionId}] 换题开场 TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
@@ -2728,11 +3036,22 @@ async function processVoiceInteraction(sessionId, session, audioBuffer, turnMeta
     sendJson(session.ws, { status: 'ai_thinking' });
     console.log(`[${sessionId}] Step 1: 语音识别中...`);
 
+    const asrStartTime = Date.now();
     const userText = await recognizeLongFormSpeech(audioBuffer, async (chunk, chunkMeta) => {
         if (chunkMeta.total > 1) {
             console.log(`[${sessionId}] 长语音分段识别 ${chunkMeta.index + 1}/${chunkMeta.total}，${(chunk.length / 1024).toFixed(1)} KB`);
         }
         return recognizeSpeech(chunk);
+    });
+    await usageRecorder.recordUsage({
+        userId,
+        sessionId,
+        provider: getVoiceUsageProvider(),
+        model: getAsrUsageModel(),
+        operation: 'asr',
+        audioSeconds: audioBuffer.length / 32000,
+        status: userText ? 'success' : 'failed',
+        latencyMs: Date.now() - asrStartTime,
     });
     if (!userText) {
         sendJson(session.ws, {
@@ -2916,7 +3235,10 @@ async function startRecommendationQuestion(sessionId, session, msg) {
 
     if (!shouldSpeak) return;
 
-    const audioData = await synthesizeSpeech(record.aiReply, session.userPreferences);
+    const audioData = await synthesizeSpeech(record.aiReply, session.userPreferences, {
+        userId,
+        sessionId,
+    });
     if (audioData) {
         session.ws.send(audioData);
         console.log(`[${sessionId}] 推荐问题 TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
@@ -2966,11 +3288,24 @@ async function chatWithAI(sessionId, session, userText, options = {}) {
             ...session.conversationHistory,
         ];
 
-        let aiReply = await aiProvider.completeChat({
+        const usageStartTime = Date.now();
+        const aiResult = await aiProvider.completeChat({
             messages,
             temperature: 0.7,
             topP: 0.9,
-        }) || '抱歉，我没有理解，请再说一次。';
+        });
+        await usageRecorder.recordUsage({
+            userId: session.userId,
+            sessionId,
+            provider: aiResult?.provider || aiProvider.name,
+            model: aiResult?.model || '',
+            operation: 'chat',
+            ...(aiResult?.usage || {}),
+            inputContextTokens: aiResult?.usage?.inputTokens || 0,
+            status: 'success',
+            latencyMs: Date.now() - usageStartTime,
+        });
+        let aiReply = aiResult?.text || aiResult || '抱歉，我没有理解，请再说一次。';
         const selectedTopic = topicProfile ? getSelectedTopic(topicProfile, session.currentTopicId) : null;
         const safeReply = normalizeQuestionForElder({
             question: aiReply,
@@ -2986,6 +3321,14 @@ async function chatWithAI(sessionId, session, userText, options = {}) {
         }
         return aiReply;
     } catch (err) {
+        await usageRecorder.recordUsage({
+            userId: session.userId,
+            sessionId,
+            provider: aiProvider.name,
+            operation: 'chat',
+            status: 'failed',
+            errorMessage: err.message || String(err),
+        });
         console.error(`[${aiProvider.name}] 对话失败:`, err.message || err);
         if (session.pendingRecommendationQuestion) {
             session.pendingRecommendationQuestion = null;
@@ -3014,13 +3357,24 @@ async function analyzeTopicProgressFromTurn(sessionId, session, userText, aiRepl
     const prompt = buildTopicTurnAnalysisPrompt(profile, session.currentTopicId, userText, aiReply);
     if (!prompt) return;
 
+    const topicAnalysisModel = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+    const usageStartTime = Date.now();
     const response = await deepseekClient.chat.completions.create({
-        model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+        model: topicAnalysisModel,
         messages: [
             { role: 'user', content: prompt },
         ],
         temperature: 0.2,
         response_format: { type: 'json_object' },
+    });
+    await recordOpenAICompatibleUsage({
+        userId,
+        sessionId,
+        provider: 'deepseek',
+        model: topicAnalysisModel,
+        operation: 'topic_analysis',
+        response,
+        startTime: usageStartTime,
     });
 
     const rawContent = response.choices[0].message.content;
@@ -3044,10 +3398,34 @@ async function analyzeTopicProgressFromTurn(sessionId, session, userText, aiRepl
     }
 }
 
-async function synthesizeSpeech(text, userPreferences = DEFAULT_USER_PREFERENCES) {
+async function synthesizeSpeech(text, userPreferences = DEFAULT_USER_PREFERENCES, usageContext = {}) {
+    const usageStartTime = Date.now();
     try {
-        return await voiceProvider.synthesizeSpeech(text, userPreferences);
+        const audioData = await voiceProvider.synthesizeSpeech(text, userPreferences);
+        await usageRecorder.recordUsage({
+            userId: usageContext.userId || null,
+            sessionId: usageContext.sessionId || null,
+            provider: getVoiceUsageProvider(),
+            model: getTtsUsageModel(),
+            operation: 'tts',
+            ttsChars: String(text || '').length,
+            outputAudioKB: audioData ? Math.round(audioData.length / 1024) : 0,
+            status: audioData ? 'success' : 'failed',
+            latencyMs: Date.now() - usageStartTime,
+        });
+        return audioData;
     } catch (err) {
+        await usageRecorder.recordUsage({
+            userId: usageContext.userId || null,
+            sessionId: usageContext.sessionId || null,
+            provider: getVoiceUsageProvider(),
+            model: getTtsUsageModel(),
+            operation: 'tts',
+            ttsChars: String(text || '').length,
+            status: 'failed',
+            errorMessage: err.message || String(err),
+            latencyMs: Date.now() - usageStartTime,
+        });
         console.error(`[TTS:${voiceProvider.name}] 合成失败:`, err.message || err);
         return null;
     }

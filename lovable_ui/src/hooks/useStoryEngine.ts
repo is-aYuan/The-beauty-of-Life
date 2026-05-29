@@ -44,8 +44,16 @@ export type User = {
   userId: string;
   phone: string;
   name: string;
-  age?: number;
+  age?: number | null;
   authToken?: string;
+};
+export type UserProfileUpdate = {
+  name: string;
+  age?: string | number | null;
+};
+export type AccountDeletionInput = {
+  password: string;
+  confirmText: string;
 };
 export type ConvoState = "idle" | "userRecording" | "aiThinking" | "aiTalking";
 export type ChatMessage = {
@@ -111,6 +119,7 @@ export function useStoryEngine() {
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const connectWebSocketRef = useRef<(() => void) | null>(null);
   const userPreferencesRef = useRef<UserPreferences>(userPreferences);
+  const preferenceSyncVersionRef = useRef(0);
   const inputModeRef = useRef<"voice" | "text">("voice");
 
   // Audio Refs
@@ -295,16 +304,29 @@ export function useStoryEngine() {
     }
   };
 
-  // 模块：用户偏好同步。前端先本地即时生效，再与云端保持一致。
+  // 模块：用户偏好同步。前端先本地即时生效，并用版本号避免旧的网络响应覆盖新设置。
+  const applyIncomingUserPreferences = (
+    input: Partial<UserPreferences>,
+    sourceVersion = preferenceSyncVersionRef.current,
+  ) => {
+    if (sourceVersion < preferenceSyncVersionRef.current) {
+      return userPreferencesRef.current;
+    }
+    const preferences = saveLocalUserPreferences(localStorage, input);
+    userPreferencesRef.current = preferences;
+    setUserPreferences(preferences);
+    return preferences;
+  };
+
   const fetchUserPreferences = async () => {
     if (!user) return userPreferencesRef.current;
+    const requestVersion = preferenceSyncVersionRef.current;
     try {
       const res = await fetch(`${CONFIG.API_BASE}/api/user-preferences/${user.userId}`);
       const data = await res.json();
       if (data.success && data.preferences) {
-        const preferences = saveLocalUserPreferences(localStorage, data.preferences);
-        setUserPreferences(preferences);
-        return preferences;
+        if (requestVersion !== preferenceSyncVersionRef.current) return userPreferencesRef.current;
+        return applyIncomingUserPreferences(data.preferences, requestVersion);
       }
     } catch (e) {
       console.error(e);
@@ -313,18 +335,18 @@ export function useStoryEngine() {
   };
 
   const updateUserPreferences = async (updates: Partial<UserPreferences>) => {
-    const next = saveLocalUserPreferences(localStorage, {
+    const requestVersion = ++preferenceSyncVersionRef.current;
+    const next = applyIncomingUserPreferences({
       ...userPreferencesRef.current,
       ...updates,
-    });
-    userPreferencesRef.current = next;
-    setUserPreferences(next);
+    }, requestVersion);
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
         JSON.stringify({
           type: "update_preferences",
           preferences: next,
+          syncVersion: requestVersion,
         }),
       );
     }
@@ -339,15 +361,81 @@ export function useStoryEngine() {
       });
       const data = await res.json();
       if (data.success && data.preferences) {
-        const saved = saveLocalUserPreferences(localStorage, data.preferences);
-        userPreferencesRef.current = saved;
-        setUserPreferences(saved);
+        if (requestVersion !== preferenceSyncVersionRef.current) return userPreferencesRef.current;
+        applyIncomingUserPreferences(data.preferences, requestVersion);
       }
     } catch (e) {
       console.error(e);
     }
 
     return userPreferencesRef.current;
+  };
+
+  // 模块：账号资料同步。只更新姓名和年龄，并把最新资料写回本地登录态，保证标题和导出链路读取一致。
+  const updateUserProfile = async (updates: UserProfileUpdate) => {
+    if (!user) {
+      return { success: false, message: "请先登录" };
+    }
+
+    try {
+      const res = await fetch(`${CONFIG.API_BASE}/api/user/${user.userId}/profile`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${user.authToken || ""}`,
+        },
+        body: JSON.stringify(updates),
+      });
+      const result = await res.json();
+
+      if (!result.success) {
+        return { success: false, message: result.message || "资料保存失败，请稍后再试" };
+      }
+
+      const nextUser: User = {
+        userId: result.userId || user.userId,
+        phone: result.phone || user.phone,
+        name: result.name || user.name,
+        age: result.age ?? null,
+        authToken: result.authToken || user.authToken,
+      };
+
+      setUser(nextUser);
+      localStorage.setItem("story_user", JSON.stringify(nextUser));
+      return { success: true, user: nextUser };
+    } catch (e) {
+      console.error(e);
+      return { success: false, message: "网络错误，请稍后再试" };
+    }
+  };
+
+  // 模块：账号注销。确认服务端已完成级联删除后，再清理本地登录态和音频会话。
+  const deleteAccount = async (input: AccountDeletionInput) => {
+    if (!user) {
+      return { success: false, message: "请先登录" };
+    }
+
+    try {
+      const res = await fetch(`${CONFIG.API_BASE}/api/user/${user.userId}/delete-account`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${user.authToken || ""}`,
+        },
+        body: JSON.stringify(input),
+      });
+      const result = await res.json();
+
+      if (!result.success) {
+        return { success: false, message: result.message || "账号注销失败，请稍后再试" };
+      }
+
+      logout();
+      return { success: true };
+    } catch (e) {
+      console.error(e);
+      return { success: false, message: "网络错误，请稍后再试" };
+    }
   };
 
   useEffect(() => {
@@ -557,8 +645,7 @@ export function useStoryEngine() {
           );
         }
         if (msg.preferences) {
-          const preferences = saveLocalUserPreferences(localStorage, msg.preferences);
-          setUserPreferences(preferences);
+          applyIncomingUserPreferences(msg.preferences);
         }
         if (msg.topicProfile) {
           setTopicProfile(msg.topicProfile);
@@ -589,8 +676,11 @@ export function useStoryEngine() {
         if (msg.status !== "ai_speaking") appendAiMessage(msg.text || "");
       }
       if (msg.event === "preferences_updated" && msg.preferences) {
-        const preferences = saveLocalUserPreferences(localStorage, msg.preferences);
-        setUserPreferences(preferences);
+        const sourceVersion =
+          typeof msg.syncVersion === "number"
+            ? msg.syncVersion
+            : preferenceSyncVersionRef.current;
+        applyIncomingUserPreferences(msg.preferences, sourceVersion);
       }
       if (msg.event === "user_transcript") {
         setChatHistory(
@@ -1165,6 +1255,8 @@ export function useStoryEngine() {
     downloadBiography,
     activateArchiveRecommendation,
     updateUserPreferences,
+    updateUserProfile,
+    deleteAccount,
     unlockAudioContext,
   };
 }

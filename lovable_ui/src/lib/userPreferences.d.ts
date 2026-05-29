@@ -1,5 +1,5 @@
 export type SpeechRatePreset = "slow" | "normal" | "fast" | "custom";
-export type FontSizePreset = "normal" | "large" | "extraLarge" | "custom";
+export type FontSizePreset = "small" | "normal" | "large" | "extraLarge" | "custom";
 
 export type UserPreferences = {
   speechRatePreset: SpeechRatePreset;
@@ -16,6 +16,7 @@ export const SPEECH_RATE_RANGE: { min: number; max: number; step: number };
 export const FONT_SCALE_RANGE: { min: number; max: number; step: number };
 
 export function normalizeUserPreferences(input?: Partial<UserPreferences> | null): UserPreferences;
+export function getFontSizePresetByScale(fontScale: number): Exclude<FontSizePreset, "custom"> | null;
 export function loadLocalUserPreferences(storage?: Storage): UserPreferences;
 export function saveLocalUserPreferences(storage: Storage | undefined, input: Partial<UserPreferences>): UserPreferences;
 export function buildFontScaleCssValue(input?: Partial<UserPreferences> | null): string;
