@@ -74,6 +74,37 @@ function formatAdminAge(age: AdminUser["age"]) {
   return age ? `${age} 岁` : "- 岁";
 }
 
+type AdminConversation = {
+  _id?: string;
+  sessionId?: string;
+  timestamp?: string;
+  userText?: string;
+  aiReply?: string;
+  answeredAiPromptText?: string;
+  aiPromptText?: string;
+};
+
+// 模块：后台问答配对展示。优先使用入库硬字段；缺字段的连续旧记录只读回看上一轮 AI 下一问。
+function getAnsweredPromptText(
+  conversation: AdminConversation,
+  previousChronologicalConversation?: AdminConversation,
+) {
+  const storedPrompt = conversation?.answeredAiPromptText || conversation?.aiPromptText;
+  if (storedPrompt) return storedPrompt;
+
+  const previousAiReply = previousChronologicalConversation?.aiReply;
+  if (!previousAiReply) return "";
+  if (
+    conversation?.sessionId &&
+    previousChronologicalConversation?.sessionId &&
+    conversation.sessionId !== previousChronologicalConversation.sessionId
+  ) {
+    return "";
+  }
+
+  return previousAiReply;
+}
+
 function AdminPage() {
   const [token, setToken] = useState(getStoredAdminToken);
   const [phone, setPhone] = useState("");
@@ -588,26 +619,36 @@ function UserDetailModal({
                 (!Array.isArray(data) || data.length === 0 ? (
                   <p className="text-center text-stone-400 mt-10">暂无对话记录</p>
                 ) : (
-                  data.map((c: any) => (
-                    <div
-                      key={c._id}
-                      className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm flex flex-col gap-3"
-                    >
-                      <div className="flex items-start justify-between border-b border-stone-100 pb-3">
-                        <div className="text-sm font-medium text-stone-500 flex items-center gap-2">
-                          <Clock className="h-4 w-4" /> {formatTime(c.timestamp)}
+                  data.map((c: AdminConversation, index: number) => {
+                    const answeredPrompt = getAnsweredPromptText(c, data[index + 1]);
+
+                    return (
+                      <div
+                        key={c._id}
+                        className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm flex flex-col gap-3"
+                      >
+                        <div className="flex items-start justify-between border-b border-stone-100 pb-3">
+                          <div className="text-sm font-medium text-stone-500 flex items-center gap-2">
+                            <Clock className="h-4 w-4" /> {formatTime(c.timestamp)}
+                          </div>
+                        </div>
+                        {answeredPrompt && (
+                          <div className="rounded-lg bg-sky-50/70 p-3 leading-relaxed text-stone-700">
+                            <strong className="text-sky-800">AI 提问：</strong>
+                            {answeredPrompt}
+                          </div>
+                        )}
+                        <div className="rounded-lg bg-amber-50/60 p-3 leading-relaxed text-stone-800">
+                          <strong className="text-amber-800">老人回答：</strong>
+                          {c.userText}
+                        </div>
+                        <div className="rounded-lg bg-stone-50 p-3 leading-relaxed text-stone-600">
+                          <strong className="text-stone-900">AI 下一问：</strong>
+                          {c.aiReply}
                         </div>
                       </div>
-                      <div className="rounded-lg bg-amber-50/60 p-3 leading-relaxed text-stone-800">
-                        <strong className="text-amber-800">老人诉说：</strong>
-                        {c.userText}
-                      </div>
-                      <div className="rounded-lg bg-stone-50 p-3 leading-relaxed text-stone-600">
-                        <strong className="text-stone-900">AI 回复：</strong>
-                        {c.aiReply}
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 ))}
 
               {activeTab === "summary" &&

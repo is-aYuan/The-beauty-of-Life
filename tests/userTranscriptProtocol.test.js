@@ -17,7 +17,7 @@ test('server exposes a voice-turn protocol and sends user transcript before AI r
     assert.match(source, /recognizeLongFormSpeech/);
     assert.match(source, /pendingEntryGuidance/);
     assert.match(source, /buildAnsweredEntryGuidanceTurn/);
-    assert.match(source, /aiPromptText/);
+    assert.match(source, /answeredAiPromptText/);
     assert.match(source, /promptSource/);
 });
 

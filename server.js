@@ -84,6 +84,14 @@ const {
     buildTopicSwitchOpening,
 } = require('./lib/topicSwitchOpening');
 const {
+    appendAnsweredPromptToHistoryIfMissing,
+    buildAnsweredPromptFromPreviousConversation,
+    clearLastAiPrompt,
+    formatConversationForSummary,
+    rememberAiPromptForNextTurn,
+    resolveAnsweredPromptForTurn,
+} = require('./lib/conversationTurnPairing');
+const {
     normalizeQuestionForElder,
 } = require('./lib/questionSafety');
 const {
@@ -787,6 +795,23 @@ async function getSessionConversations(sessionId) {
     return result.data;
 }
 
+// 模块：问答配对数据库兜底。内存里的上一问丢失时，从真实 conversation 链路恢复“本轮回答的是哪一句 AI 提问”。
+async function getLatestConversationForAnsweredPrompt(sessionId, userId) {
+    const sessionResult = await db.collection('conversations')
+        .where({ sessionId, userId })
+        .orderBy('timestamp', 'desc')
+        .limit(1)
+        .get();
+    if (sessionResult.data?.[0]) return sessionResult.data[0];
+
+    const userResult = await db.collection('conversations')
+        .where({ userId })
+        .orderBy('timestamp', 'desc')
+        .limit(1)
+        .get();
+    return userResult.data?.[0] || null;
+}
+
 async function getUserSummaries(userId) {
     const result = await db.collection('summaries')
         .where({ userId })
@@ -835,10 +860,9 @@ async function extractNarrativeSummary(sessionId, userId) {
     const topicProfile = await getOrCreateTopicProfile(userId);
     const selectedTopic = getSelectedTopic(topicProfile, latestTopicId);
 
-    // 格式化对话为文本
+    // 格式化对话为严格问答文本，避免把“老人回答”和“AI下一问”误合成同一问答。
     const dialogueText = conversations.map((c, i) => {
-        const topicLabel = c.topicTitle || selectedTopic?.title || '未标记主题';
-        return `【第${i + 1}轮｜主题：${topicLabel}】\n用户：${c.userText}\nAI：${c.aiReply}`;
+        return formatConversationForSummary(c, i, selectedTopic?.title || '未标记主题');
     }).join('\n\n');
 
     // 计算本次会话素材字数
@@ -2458,6 +2482,8 @@ wss.on('connection', async (ws) => {
         pendingEntryGuidance: null,
         pendingRecommendationQuestion: null,
         pendingTopicOpening: null,
+        pendingAnsweredPrompt: null,
+        lastAiPrompt: null,
         topicTransitionPrompt: null,
         topicTransitionSuppressTurns: 0,
         richTopicPromptedTopicIds: new Set(),
@@ -2590,6 +2616,8 @@ async function handleMessage(sessionId, session, msg) {
             session.currentTopicId = topicProfile.currentTopicId;
             session.pendingEntryGuidance = entry.entryGuidance;
             session.pendingTopicOpening = null;
+            session.pendingAnsweredPrompt = null;
+            clearLastAiPrompt(session);
             const hasBiography = await checkHasBiography(result.userId);
 
             sendJson(session.ws, {
@@ -2631,6 +2659,8 @@ async function handleMessage(sessionId, session, msg) {
             session.currentTopicId = topicProfile.currentTopicId;
             session.pendingEntryGuidance = entry.entryGuidance;
             session.pendingTopicOpening = null;
+            session.pendingAnsweredPrompt = null;
+            clearLastAiPrompt(session);
             sendJson(session.ws, {
                 status: 'ready',
                 text: entry.entryGuidance.displayText,
@@ -2672,6 +2702,8 @@ async function handleMessage(sessionId, session, msg) {
             session.pendingTopicOpening = null;
             session.pendingEntryGuidance = null;
             session.pendingRecommendationQuestion = null;
+            session.pendingAnsweredPrompt = null;
+            clearLastAiPrompt(session);
             session.topicTransitionSuppressTurns = 0;
             session.conversationHistory = [];
 
@@ -2996,6 +3028,8 @@ async function handleTopicTransitionChoice(sessionId, session, choiceText, expli
             session.topicTransitionPrompt = null;
             session.topicTransitionSuppressTurns = 0;
             session.conversationHistory = [];
+            session.pendingAnsweredPrompt = null;
+            clearLastAiPrompt(session);
             const opening = buildTopicSwitchOpening({
                 topicProfile,
                 topicId: topicProfile.currentTopicId,
@@ -3124,7 +3158,13 @@ async function processUserTextInteraction(sessionId, session, {
     const answeredEntryGuidance = buildAnsweredEntryGuidanceTurn(session.pendingEntryGuidance);
     const answeredTopicOpening = buildAnsweredTopicSwitchOpeningTurn(session.pendingTopicOpening);
     const answeredRecommendationQuestion = buildAnsweredRecommendationQuestionTurn(session.pendingRecommendationQuestion);
-    const answeredPrompt = answeredRecommendationQuestion || answeredTopicOpening || answeredEntryGuidance;
+    session.pendingAnsweredPrompt = answeredRecommendationQuestion || answeredTopicOpening || answeredEntryGuidance;
+    const previousConversation = !session.pendingAnsweredPrompt && !session.lastAiPrompt
+        ? await getLatestConversationForAnsweredPrompt(sessionId, userId)
+        : null;
+    const persistedAnsweredPrompt = buildAnsweredPromptFromPreviousConversation(previousConversation);
+    const answeredPrompt = resolveAnsweredPromptForTurn(session, persistedAnsweredPrompt);
+    session.pendingAnsweredPrompt = null;
     const promptSource = answeredPrompt?.promptSource || null;
 
     // ── Step 2: 大模型对话 (混元) ──
@@ -3137,6 +3177,12 @@ async function processUserTextInteraction(sessionId, session, {
 
     await saveConversation(sessionId, userId, {
         ...(answeredPrompt || {}),
+        answeredAiPromptText: answeredPrompt?.answeredAiPromptText || '',
+        answeredAiPromptDisplayText: answeredPrompt?.answeredAiPromptDisplayText || '',
+        answeredAiPromptSource: answeredPrompt?.answeredAiPromptSource || '',
+        answeredAiPromptTopicId: answeredPrompt?.answeredAiPromptTopicId || '',
+        answeredAiPromptTopicTitle: answeredPrompt?.answeredAiPromptTopicTitle || '',
+        answeredAiPromptNextQuestion: answeredPrompt?.answeredAiPromptNextQuestion || '',
         userText,
         aiReply,
         inputMode,
@@ -3145,6 +3191,12 @@ async function processUserTextInteraction(sessionId, session, {
         topicId: selectedTopic?.id || session.currentTopicId || DEFAULT_TOPIC_ID,
         topicTitle: selectedTopic?.title || '',
         topicProgress: selectedTopic?.progress || 0,
+    });
+    rememberAiPromptForNextTurn(session, {
+        text: aiReply,
+        source: 'ai_reply',
+        topicId: selectedTopic?.id || session.currentTopicId || DEFAULT_TOPIC_ID,
+        topicTitle: selectedTopic?.title || '',
     });
     if (promptSource === 'entry_guidance') {
         session.pendingEntryGuidance = null;
@@ -3206,6 +3258,8 @@ async function startRecommendationQuestion(sessionId, session, msg) {
     session.pendingEntryGuidance = null;
     session.topicTransitionPrompt = null;
     session.pendingTopicOpening = null;
+    session.pendingAnsweredPrompt = null;
+    clearLastAiPrompt(session);
 
     session.pendingRecommendationQuestion = {
         topicId: record.topicId,
@@ -3259,12 +3313,7 @@ async function recognizeSpeech(audioBuffer) {
 async function chatWithAI(sessionId, session, userText, options = {}) {
     try {
         const answeredPrompt = options.answeredPrompt || options.answeredEntryGuidance;
-        if (answeredPrompt?.aiPromptText) {
-            session.conversationHistory.push({
-                Role: 'assistant',
-                Content: answeredPrompt.aiPromptText,
-            });
-        }
+        appendAnsweredPromptToHistoryIfMissing(session, answeredPrompt);
         session.conversationHistory.push({ Role: 'user', Content: userText });
 
         if (session.conversationHistory.length > 40) {
