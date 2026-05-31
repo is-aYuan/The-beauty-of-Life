@@ -152,6 +152,11 @@ const {
     recordUserConsent,
     validateConsentInput,
 } = require('./lib/legalConsent');
+const {
+    buildFallbackSummary,
+    normalizeSummaryData,
+    parseAiJsonObject,
+} = require('./lib/summaryJson');
 
 const PROVIDER_CONFIG = getProviderConfig(process.env);
 
@@ -965,24 +970,21 @@ async function extractNarrativeSummary(sessionId, userId) {
         let summaryData;
 
         try {
-            summaryData = JSON.parse(rawContent);
+            summaryData = normalizeSummaryData(parseAiJsonObject(rawContent), {
+                topicId: latestTopicId,
+                topicTitle: selectedTopic?.title || '未标记主题',
+                conversations,
+            });
         } catch (parseErr) {
-            const jsonMatch = rawContent.match(/```(?:json)?\s*([\s\S]*?)```/);
-            if (jsonMatch) {
-                summaryData = JSON.parse(jsonMatch[1].trim());
-            } else {
-                throw new Error('无法解析 AI 返回的 JSON');
-            }
+            console.warn(`[摘要] AI 返回 JSON 解析失败，使用原始对话兜底摘要:`, parseErr.message);
+            summaryData = buildFallbackSummary({
+                conversations,
+                topicId: latestTopicId,
+                topicTitle: selectedTopic?.title || '未标记主题',
+            });
         }
 
-        const topicAnalysis = summaryData.topicAnalysis
-            ? {
-                ...summaryData.topicAnalysis,
-                topicId: BIOGRAPHY_TOPICS.some(topic => topic.id === summaryData.topicAnalysis.topicId)
-                    ? summaryData.topicAnalysis.topicId
-                    : latestTopicId,
-            }
-            : null;
+        const topicAnalysis = summaryData.topicAnalysis;
 
         // 存入 CloudBase summaries 集合
         await db.collection('summaries').add({
