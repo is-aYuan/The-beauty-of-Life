@@ -36,7 +36,7 @@ function MiniVisualizer({ freqData }: { freqData: Uint8Array | null }) {
   });
 
   return (
-    <div className="mt-1 flex h-5 items-end justify-center gap-1">
+    <div className="mt-1 flex h-5 items-end justify-center gap-0.5 xs:gap-1">
       {bars.map((height, index) => (
         <span
           key={index}
@@ -68,7 +68,8 @@ export function RecorderControls({
   const offline = networkStatus === "offline";
   const holdPointerActiveRef = useRef(false);
   // 模块：状态提示行。空闲时不展示重复说明，只在录音、思考、播放和异常时占位。
-  const showStatusLine = convoState !== "idle" || offline || (recordMode !== "text" && !!recorderError);
+  const showStatusLine =
+    convoState !== "idle" || offline || (recordMode !== "text" && !!recorderError);
 
   useEffect(() => {
     if (!holdPointerActiveRef.current) return;
@@ -107,11 +108,11 @@ export function RecorderControls({
   };
 
   return (
-    <section className="shrink-0 border-t border-amber-200 bg-amber-50 px-4 pb-2 pt-2 shadow-[0_-8px_18px_rgba(120,72,30,0.08)]">
+    <section className="min-w-0 shrink-0 overflow-x-hidden border-t border-amber-200 bg-amber-50 px-3 pb-1.5 pt-1.5 shadow-[0_-8px_18px_rgba(120,72,30,0.08)] xs:px-4 xs:pb-2 xs:pt-2">
       {/* 模块：富主题换题入口。由首页注入，录音控制只负责摆放在主按钮附近。 */}
       {topicTransitionControls}
 
-      <div className="mb-2 grid grid-cols-3 rounded-xl bg-amber-100 p-1">
+      <div className="mb-2 grid min-w-0 grid-cols-3 rounded-lg bg-amber-100 p-0.5 xs:rounded-xl xs:p-1">
         {(
           [
             { id: "hold", label: "长按说话" },
@@ -126,7 +127,7 @@ export function RecorderControls({
               type="button"
               disabled={convoState !== "idle"}
               onClick={() => onRecordModeChange(option.id)}
-              className={`min-h-11 rounded-lg text-base font-black transition-colors disabled:opacity-60 ${
+              className={`min-h-10 min-w-0 rounded-lg px-1 text-sm font-black transition-colors disabled:opacity-60 xs:min-h-11 xs:text-base ${
                 active ? "bg-white text-stone-900 shadow-sm" : "text-stone-600"
               }`}
             >
@@ -139,18 +140,24 @@ export function RecorderControls({
       {showStatusLine && (
         <div className="mb-2 min-h-8 text-center">
           {recordMode !== "text" && recorderError ? (
-            <p className="text-sm font-black leading-snug text-red-600">{recorderError}</p>
+            <p className="mobile-safe-text text-xs font-black leading-snug text-red-600 xs:text-sm">
+              {recorderError}
+            </p>
           ) : offline ? (
-            <p className="animate-pulse text-sm font-black text-amber-700">网络异常，正在重连...</p>
+            <p className="animate-pulse text-xs font-black text-amber-700 xs:text-sm">
+              网络异常，正在重连...
+            </p>
           ) : convoState === "userRecording" ? (
             <>
-              <p className="text-sm font-black text-emerald-600">正在听您说...</p>
+              <p className="text-xs font-black text-emerald-600 xs:text-sm">正在听您说...</p>
               <MiniVisualizer freqData={frequencyData} />
             </>
           ) : convoState === "aiThinking" ? (
-            <p className="animate-pulse text-sm font-black text-orange-600">{aiThinkingText}</p>
+            <p className="mobile-safe-text animate-pulse text-xs font-black text-orange-600 xs:text-sm">
+              {aiThinkingText}
+            </p>
           ) : convoState === "aiTalking" ? (
-            <p className="text-sm font-black text-blue-600">AI 正在朗读回应...</p>
+            <p className="text-xs font-black text-blue-600 xs:text-sm">AI 正在朗读回应...</p>
           ) : null}
         </div>
       )}
@@ -175,9 +182,9 @@ export function RecorderControls({
               void onStartAutoRecord();
             }
           }}
-          className="flex min-h-[60px] w-full touch-none items-center justify-center gap-2 rounded-2xl border border-[#F5D76B] bg-[#FFEA92] px-5 text-xl font-black text-[#241F1C] shadow-[0_8px_18px_rgba(160,120,30,0.16)] transition-transform active:scale-[0.98] disabled:cursor-not-allowed disabled:border-[#D8D0C0] disabled:bg-[#E8E1D3] disabled:text-[#8A8174]"
+          className="flex min-h-[52px] w-full touch-none items-center justify-center gap-2 rounded-2xl border border-[#F5D76B] bg-[#FFEA92] px-4 text-lg font-black text-[#241F1C] shadow-[0_8px_18px_rgba(160,120,30,0.16)] transition-transform active:scale-[0.98] disabled:cursor-not-allowed disabled:border-[#D8D0C0] disabled:bg-[#E8E1D3] disabled:text-[#8A8174] xs:min-h-[60px] xs:px-5 xs:text-xl"
         >
-          <Mic className="h-7 w-7" />
+          <Mic className="h-6 w-6 xs:h-7 xs:w-7" />
           {recordMode === "hold" ? "按住说话" : "开始录音"}
         </button>
       )}
@@ -186,9 +193,9 @@ export function RecorderControls({
         <button
           type="button"
           onClick={onStopAutoRecord}
-          className="flex min-h-[60px] w-full items-center justify-center gap-2 rounded-2xl bg-stone-800 px-5 text-xl font-black text-amber-50 shadow-md active:scale-[0.98]"
+          className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-2xl bg-stone-800 px-4 text-lg font-black text-amber-50 shadow-md active:scale-[0.98] xs:min-h-[60px] xs:px-5 xs:text-xl"
         >
-          <Square className="h-7 w-7" />
+          <Square className="h-6 w-6 xs:h-7 xs:w-7" />
           讲完了
         </button>
       )}
@@ -199,9 +206,9 @@ export function RecorderControls({
           onMouseLeave={onStopManualRecord}
           onPointerUp={stopHoldRecording}
           onPointerCancel={stopHoldRecording}
-          className="flex min-h-[60px] w-full touch-none animate-pulse items-center justify-center gap-2 rounded-2xl border border-[#241F1C] bg-[#241F1C] px-5 text-xl font-black text-[#FFF7D6] shadow-[0_0_0_6px_rgba(255,234,146,0.22),0_8px_18px_rgba(36,31,28,0.24)]"
+          className="flex min-h-[52px] w-full touch-none animate-pulse items-center justify-center gap-2 rounded-2xl border border-[#241F1C] bg-[#241F1C] px-4 text-lg font-black text-[#FFF7D6] shadow-[0_0_0_6px_rgba(255,234,146,0.22),0_8px_18px_rgba(36,31,28,0.24)] xs:min-h-[60px] xs:px-5 xs:text-xl"
         >
-          <Mic className="h-7 w-7 text-[#FFF7D6]" />
+          <Mic className="h-6 w-6 text-[#FFF7D6] xs:h-7 xs:w-7" />
           松开发送
         </div>
       )}
@@ -210,16 +217,16 @@ export function RecorderControls({
         <button
           type="button"
           onClick={onStopAll}
-          className="flex min-h-[60px] w-full items-center justify-center gap-2 rounded-2xl bg-stone-800 px-5 text-xl font-black text-amber-50 shadow-md active:scale-[0.98]"
+          className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-2xl bg-stone-800 px-4 text-lg font-black text-amber-50 shadow-md active:scale-[0.98] xs:min-h-[60px] xs:px-5 xs:text-xl"
         >
-          <Square className="h-7 w-7" />
+          <Square className="h-6 w-6 xs:h-7 xs:w-7" />
           停止播放
         </button>
       )}
 
       {convoState === "aiThinking" && (
-        <div className="flex min-h-[60px] w-full items-center justify-center gap-2 rounded-2xl border border-[#E9D78F] bg-[#F8E8B2] px-5 text-xl font-black text-[#6B5A2A] shadow-[0_8px_18px_rgba(160,120,30,0.1)]">
-          <Sparkles className="h-7 w-7 animate-spin" />
+        <div className="mobile-safe-text flex min-h-[52px] w-full items-center justify-center gap-2 rounded-2xl border border-[#E9D78F] bg-[#F8E8B2] px-4 text-lg font-black text-[#6B5A2A] shadow-[0_8px_18px_rgba(160,120,30,0.1)] xs:min-h-[60px] xs:px-5 xs:text-xl">
+          <Sparkles className="h-6 w-6 animate-spin xs:h-7 xs:w-7" />
           {aiThinkingText}
         </div>
       )}

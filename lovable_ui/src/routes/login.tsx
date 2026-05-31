@@ -21,7 +21,7 @@ function LoginPage() {
   const [errorMsg, setErrorMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
-  
+
   const { login, register, setPassword: setUserPassword, unlockAudioContext } = useStoryEngine();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -44,7 +44,9 @@ function LoginPage() {
       return;
     }
     if (!acceptedLegalTerms || !acceptedPersonalInfoProcessing) {
-      window.alert("请先勾选协议后继续\n\n为了保护您和家人的信息安全，使用前需要先阅读并同意相关协议。");
+      window.alert(
+        "请先勾选协议后继续\n\n为了保护您和家人的信息安全，使用前需要先阅读并同意相关协议。",
+      );
       return;
     }
 
@@ -52,7 +54,7 @@ function LoginPage() {
       acceptedLegalTerms,
       acceptedPersonalInfoProcessing,
     };
-    
+
     setIsLoading(true);
     setErrorMsg("");
 
@@ -85,7 +87,7 @@ function LoginPage() {
   };
 
   const inputCls =
-    "bg-stone-900/50 text-amber-100 text-xl w-full p-4 rounded-xl mb-4 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-amber-200/40 border border-stone-700";
+    "bg-stone-900/50 text-amber-100 text-lg xs:text-xl w-full min-w-0 p-3 xs:p-4 rounded-xl mb-4 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-amber-200/40 border border-stone-700";
 
   const switchMode = () => {
     setIsLogin(!isLogin);
@@ -106,14 +108,14 @@ function LoginPage() {
 
   return (
     <main
-      className="min-h-screen w-full flex items-center justify-center p-6"
+      className="flex min-h-screen w-full items-center justify-center p-3 xs:p-6"
       style={{
         backgroundColor: "#fde9c4",
         backgroundImage:
           "radial-gradient(circle at 20% 30%, rgba(180,120,60,0.15), transparent 60%), radial-gradient(circle at 80% 70%, rgba(140,80,30,0.18), transparent 55%)",
       }}
     >
-      <div className="w-full max-w-md bg-stone-800 rounded-r-3xl rounded-l-md shadow-2xl p-8 relative border-l-8 border-stone-900">
+      <div className="relative w-full min-w-0 max-w-md rounded-l-md rounded-r-3xl border-l-8 border-stone-900 bg-stone-800 p-5 shadow-2xl xs:p-8">
         {/* Decorative corner */}
         <div className="absolute top-6 right-6 opacity-30">
           <BookLock className="h-10 w-10 text-amber-300" />
@@ -121,17 +123,17 @@ function LoginPage() {
 
         {/* Title */}
         <h1
-          className="text-5xl text-amber-400 font-serif mb-2"
+          className="mb-2 text-4xl font-serif text-amber-400 xs:text-5xl"
           style={{ fontFamily: "'Noto Serif SC', serif" }}
         >
           故事坊
         </h1>
-        <p className="text-xl text-amber-200/80 mb-8">
+        <p className="mobile-safe-text mb-6 text-lg text-amber-200/80 xs:mb-8 xs:text-xl">
           {needsPasswordSetup ? "请先设置登录密码" : "AI 家庭记忆传承"}
         </p>
 
         {errorMsg && (
-          <p className="text-red-400 text-center mb-4 bg-red-900/20 p-2 rounded-lg animate-pulse">
+          <p className="mobile-safe-text mb-4 rounded-lg bg-red-900/20 p-2 text-center text-red-400 animate-pulse">
             {errorMsg}
           </p>
         )}
@@ -231,7 +233,7 @@ function LoginPage() {
           <button
             type="submit"
             disabled={isLoading}
-            className="bg-amber-600 text-white text-2xl font-bold w-full py-4 rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all mt-2 disabled:opacity-50 disabled:hover:scale-100 cursor-pointer"
+            className="mt-2 w-full cursor-pointer rounded-xl bg-amber-600 py-4 text-xl font-bold text-white shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100 xs:text-2xl"
           >
             {isLoading ? "处理中..." : submitLabel}
           </button>
@@ -240,7 +242,7 @@ function LoginPage() {
         {!needsPasswordSetup && (
           <p
             onClick={switchMode}
-            className="text-stone-400 text-center mt-6 cursor-pointer hover:text-amber-300 text-lg transition-colors"
+            className="mobile-safe-text mt-6 cursor-pointer text-center text-base text-stone-400 transition-colors hover:text-amber-300 xs:text-lg"
           >
             {isLogin ? "第一次使用？点击这里登记" : "已有专属日记本？返回开锁"}
           </p>
@@ -248,12 +250,16 @@ function LoginPage() {
       </div>
 
       {legalDialogOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/70 p-5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/70 p-3 xs:p-5">
           <div className="max-h-[86vh] w-full max-w-2xl overflow-hidden rounded-2xl bg-amber-50 shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-amber-200 p-5">
-              <div>
-                <h2 className="text-2xl font-black text-stone-900">使用前说明</h2>
-                <p className="mt-1 text-base text-stone-600">请阅读以下内容后再勾选同意。</p>
+            <div className="flex items-start justify-between gap-3 border-b border-amber-200 p-4 xs:gap-4 xs:p-5">
+              <div className="min-w-0">
+                <h2 className="mobile-safe-text text-xl font-black text-stone-900 xs:text-2xl">
+                  使用前说明
+                </h2>
+                <p className="mobile-safe-text mt-1 text-sm text-stone-600 xs:text-base">
+                  请阅读以下内容后再勾选同意。
+                </p>
               </div>
               <button
                 type="button"
@@ -264,12 +270,14 @@ function LoginPage() {
               </button>
             </div>
 
-            <div className="max-h-[62vh] space-y-4 overflow-y-auto p-5 text-base leading-relaxed text-stone-700">
+            <div className="mobile-safe-text max-h-[62vh] space-y-4 overflow-y-auto p-4 text-base leading-relaxed text-stone-700 xs:p-5">
               <p>
-                本产品用于辅助用户记录、整理和生成个人回忆录内容，提供语音识别、AI 问答、文字整理和回忆录生成等功能，不构成法律、医疗、心理咨询、财务或其他专业建议。
+                本产品用于辅助用户记录、整理和生成个人回忆录内容，提供语音识别、AI
+                问答、文字整理和回忆录生成等功能，不构成法律、医疗、心理咨询、财务或其他专业建议。
               </p>
               <p>
-                AI 生成内容可能存在理解偏差、表述不准确、遗漏或不符合真实意图的情况。用户应自行核对、修改并确认最终内容。
+                AI
+                生成内容可能存在理解偏差、表述不准确、遗漏或不符合真实意图的情况。用户应自行核对、修改并确认最终内容。
               </p>
               <p>
                 用户讲述家庭成员、亲友或其他第三方故事时，可能涉及他人个人信息或隐私。请在合理范围内取得相关人员同意，或避免提供可能损害他人权益的敏感内容。
@@ -285,11 +293,11 @@ function LoginPage() {
               </p>
             </div>
 
-            <div className="border-t border-amber-200 p-5">
+            <div className="border-t border-amber-200 p-4 xs:p-5">
               <button
                 type="button"
                 onClick={() => setLegalDialogOpen(false)}
-                className="w-full rounded-xl bg-stone-800 py-3 text-xl font-bold text-amber-50 shadow-md"
+                className="w-full rounded-xl bg-stone-800 py-3 text-lg font-bold text-amber-50 shadow-md xs:text-xl"
               >
                 我知道了
               </button>

@@ -41,11 +41,13 @@ test('desktop story recorder uses the same warm gold primary button palette as m
 test('mobile recorder keeps touch targets but frees vertical chat space', () => {
     const source = fs.readFileSync(recorderPath, 'utf8');
 
-    assert.match(source, /px-4 pb-2 pt-2/);
-    assert.match(source, /mb-2 grid grid-cols-3/);
-    assert.match(source, /min-h-11/);
+    assert.match(source, /px-3 pb-1\.5 pt-1\.5/);
+    assert.match(source, /xs:px-4 xs:pb-2 xs:pt-2/);
+    assert.match(source, /mb-2 grid min-w-0 grid-cols-3/);
+    assert.match(source, /xs:min-h-11/);
     assert.match(source, /showStatusLine/);
     assert.doesNotMatch(source, /按住话筒/);
+    assert.match(source, /min-h-\[52px\]/);
     assert.match(source, /min-h-\[60px\]/);
     assert.doesNotMatch(source, /min-h-\[76px\]/);
     assert.doesNotMatch(source, /min-h-\[68px\]/);

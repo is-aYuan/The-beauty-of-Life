@@ -148,7 +148,11 @@ function SettingsSegment<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className={`grid ${options.length === 4 ? "grid-cols-4" : "grid-cols-3"} gap-3`}>
+    <div
+      className={`grid grid-cols-2 gap-2 xs:gap-3 ${
+        options.length === 4 ? "sm:grid-cols-4" : "sm:grid-cols-3"
+      }`}
+    >
       {options.map((option) => {
         const active = value === option.id;
         return (
@@ -156,7 +160,7 @@ function SettingsSegment<T extends string>({
             key={option.id}
             type="button"
             onClick={() => onChange(option.id)}
-            className={`rounded-2xl px-4 py-4 text-xl font-bold transition-transform hover:scale-[1.02] active:scale-[0.98] ${
+            className={`min-w-0 rounded-2xl px-3 py-3 text-lg font-bold transition-transform hover:scale-[1.02] active:scale-[0.98] xs:px-4 xs:py-4 xs:text-xl ${
               active
                 ? "bg-stone-800 text-amber-50 shadow-md"
                 : "bg-amber-100 text-stone-700 hover:bg-amber-200"
@@ -298,45 +302,47 @@ function SettingsPanel({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
       <header className="border-b-2 border-amber-200 pb-5">
-        <h2 className="text-4xl font-bold text-stone-800">设置</h2>
-        <p className="mt-2 text-xl text-stone-600">调整朗读和文字显示</p>
+        <h2 className="text-3xl font-bold text-stone-800 xs:text-4xl">设置</h2>
+        <p className="mt-2 text-base text-stone-600 xs:text-xl">调整朗读和文字显示</p>
       </header>
 
       <div className="space-y-6 py-6">
-        <section className="rounded-2xl bg-white/85 p-6 shadow-sm ring-1 ring-amber-100">
+        <section className="min-w-0 rounded-2xl bg-white/85 p-4 shadow-sm ring-1 ring-amber-100 xs:p-6">
           <div className="mb-4 flex items-center gap-3">
-            <SettingsIcon className="h-8 w-8 text-amber-700" />
-            <h3 className="text-2xl font-bold text-stone-800">个人信息</h3>
+            <SettingsIcon className="h-6 w-6 text-amber-700 xs:h-8 xs:w-8" />
+            <h3 className="text-xl font-bold text-stone-800 xs:text-2xl">个人信息</h3>
           </div>
           <form className="space-y-4" onSubmit={handleProfileSubmit}>
             <label className="block">
-              <span className="mb-2 block text-lg font-bold text-stone-700">姓名</span>
+              <span className="mb-2 block text-base font-bold text-stone-700 xs:text-lg">姓名</span>
               <input
                 value={profileName}
                 onChange={(event) => setProfileName(event.target.value)}
                 maxLength={20}
-                className="min-h-14 w-full rounded-xl border border-amber-200 bg-white px-4 text-xl font-bold text-stone-800 outline-none transition-colors focus:border-amber-500"
+                className="min-h-12 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-lg font-bold text-stone-800 outline-none transition-colors focus:border-amber-500 xs:min-h-14 xs:px-4 xs:text-xl"
                 placeholder="请输入姓名"
               />
             </label>
             <label className="block">
-              <span className="mb-2 block text-lg font-bold text-stone-700">年龄</span>
+              <span className="mb-2 block text-base font-bold text-stone-700 xs:text-lg">年龄</span>
               <input
                 value={profileAge}
                 onChange={(event) => setProfileAge(event.target.value)}
                 inputMode="numeric"
-                className="min-h-14 w-full rounded-xl border border-amber-200 bg-white px-4 text-xl font-bold text-stone-800 outline-none transition-colors focus:border-amber-500"
+                className="min-h-12 w-full min-w-0 rounded-xl border border-amber-200 bg-white px-3 text-lg font-bold text-stone-800 outline-none transition-colors focus:border-amber-500 xs:min-h-14 xs:px-4 xs:text-xl"
                 placeholder="可不填"
               />
             </label>
             <label className="block">
-              <span className="mb-2 block text-lg font-bold text-stone-700">手机号</span>
+              <span className="mb-2 block text-base font-bold text-stone-700 xs:text-lg">
+                手机号
+              </span>
               <input
                 value={user.phone}
                 readOnly
-                className="min-h-14 w-full rounded-xl border border-stone-200 bg-stone-100 px-4 text-xl font-bold text-stone-500"
+                className="min-h-12 w-full min-w-0 rounded-xl border border-stone-200 bg-stone-100 px-3 text-lg font-bold text-stone-500 xs:min-h-14 xs:px-4 xs:text-xl"
                 aria-label="手机号（只读）"
               />
             </label>
@@ -344,7 +350,7 @@ function SettingsPanel({
               <button
                 type="submit"
                 disabled={profileSaving}
-                className="min-h-12 rounded-xl bg-stone-800 px-6 text-lg font-black text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                className="min-h-10 rounded-xl bg-stone-800 px-4 text-base font-black text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 xs:min-h-12 xs:px-6 xs:text-lg"
               >
                 {profileSaving ? "保存中..." : "保存个人信息"}
               </button>
@@ -361,10 +367,10 @@ function SettingsPanel({
           </form>
         </section>
 
-        <section className="rounded-2xl bg-white/85 p-6 shadow-sm ring-1 ring-amber-100">
+        <section className="min-w-0 rounded-2xl bg-white/85 p-4 shadow-sm ring-1 ring-amber-100 xs:p-6">
           <div className="mb-4 flex items-center gap-3">
-            <Volume2 className="h-8 w-8 text-amber-700" />
-            <h3 className="text-2xl font-bold text-stone-800">朗读语速</h3>
+            <Volume2 className="h-6 w-6 text-amber-700 xs:h-8 xs:w-8" />
+            <h3 className="text-xl font-bold text-stone-800 xs:text-2xl">朗读语速</h3>
           </div>
           <SettingsSegment
             options={SPEECH_RATE_OPTIONS}
@@ -377,7 +383,7 @@ function SettingsPanel({
             }
           />
           <div className="mt-6">
-            <div className="mb-2 flex justify-between text-lg font-semibold text-stone-600">
+            <div className="mb-2 flex justify-between text-base font-semibold text-stone-600 xs:text-lg">
               <span>更慢</span>
               <span>{speechRateLabel}</span>
               <span>更快</span>
@@ -401,17 +407,17 @@ function SettingsPanel({
           <button
             type="button"
             onClick={speakPreview}
-            className="mt-5 flex items-center gap-2 rounded-xl bg-stone-800 px-5 py-3 text-lg font-bold text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
+            className="mt-5 flex items-center gap-2 rounded-xl bg-stone-800 px-4 py-2.5 text-base font-bold text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] xs:px-5 xs:py-3 xs:text-lg"
           >
             <Volume2 className="h-5 w-5" />
             {previewSpeaking ? "正在试听" : "试听朗读"}
           </button>
         </section>
 
-        <section className="rounded-2xl bg-white/85 p-6 shadow-sm ring-1 ring-amber-100">
+        <section className="min-w-0 rounded-2xl bg-white/85 p-4 shadow-sm ring-1 ring-amber-100 xs:p-6">
           <div className="mb-4 flex items-center gap-3">
-            <Type className="h-8 w-8 text-amber-700" />
-            <h3 className="text-2xl font-bold text-stone-800">字体大小</h3>
+            <Type className="h-6 w-6 text-amber-700 xs:h-8 xs:w-8" />
+            <h3 className="text-xl font-bold text-stone-800 xs:text-2xl">字体大小</h3>
           </div>
           <SettingsSegment
             options={FONT_SIZE_OPTIONS}
@@ -427,7 +433,7 @@ function SettingsPanel({
             }}
           />
           <div className="mt-6">
-            <div className="mb-2 flex justify-between text-lg font-semibold text-stone-600">
+            <div className="mb-2 flex justify-between text-base font-semibold text-stone-600 xs:text-lg">
               <span>更小</span>
               <span>{Math.round(draftFontScale * 100)}%</span>
               <span>更大</span>
@@ -451,45 +457,49 @@ function SettingsPanel({
           </div>
         </section>
 
-        <section className="rounded-2xl bg-blue-50/70 p-6 ring-1 ring-blue-100">
+        <section className="min-w-0 rounded-2xl bg-blue-50/70 p-4 ring-1 ring-blue-100 xs:p-6">
           <p
-            className="leading-relaxed text-blue-900"
+            className="mobile-safe-text leading-relaxed text-blue-900"
             style={{ fontSize: `${Math.round(24 * draftFontScale)}px` }}
           >
             {previewText}
           </p>
         </section>
 
-        <section className="rounded-2xl border border-red-200 bg-red-50/80 p-6 shadow-sm">
+        <section className="min-w-0 rounded-2xl border border-red-200 bg-red-50/80 p-4 shadow-sm xs:p-6">
           <div className="mb-4 flex items-start gap-3">
-            <AlertTriangle className="mt-1 h-8 w-8 shrink-0 text-red-600" />
-            <div>
-              <h3 className="text-2xl font-bold text-red-900">注销账号与删除资料</h3>
-              <p className="mt-2 text-base leading-relaxed text-red-800">
+            <AlertTriangle className="mt-1 h-6 w-6 shrink-0 text-red-600 xs:h-8 xs:w-8" />
+            <div className="min-w-0">
+              <h3 className="mobile-safe-text text-xl font-bold text-red-900 xs:text-2xl">
+                注销账号与删除资料
+              </h3>
+              <p className="mobile-safe-text mt-2 text-base leading-relaxed text-red-800">
                 注销后会删除个人信息、对话记录、回忆库、回忆录、主题进度和本地录音文件，删除后无法恢复。
               </p>
             </div>
           </div>
           <form className="space-y-4" onSubmit={handleDeleteAccountSubmit}>
             <label className="block">
-              <span className="mb-2 block text-lg font-bold text-red-900">登录密码</span>
+              <span className="mb-2 block text-base font-bold text-red-900 xs:text-lg">
+                登录密码
+              </span>
               <input
                 type="password"
                 value={deletePassword}
                 onChange={(event) => setDeletePassword(event.target.value)}
                 autoComplete="current-password"
-                className="min-h-14 w-full rounded-xl border border-red-200 bg-white px-4 text-xl font-bold text-stone-800 outline-none transition-colors focus:border-red-500"
+                className="min-h-12 w-full min-w-0 rounded-xl border border-red-200 bg-white px-3 text-lg font-bold text-stone-800 outline-none transition-colors focus:border-red-500 xs:min-h-14 xs:px-4 xs:text-xl"
                 placeholder="请输入登录密码"
               />
             </label>
             <label className="block">
-              <span className="mb-2 block text-lg font-bold text-red-900">
+              <span className="mb-2 block text-base font-bold text-red-900 xs:text-lg">
                 输入“确认注销”
               </span>
               <input
                 value={deleteConfirmText}
                 onChange={(event) => setDeleteConfirmText(event.target.value)}
-                className="min-h-14 w-full rounded-xl border border-red-200 bg-white px-4 text-xl font-bold text-stone-800 outline-none transition-colors focus:border-red-500"
+                className="min-h-12 w-full min-w-0 rounded-xl border border-red-200 bg-white px-3 text-lg font-bold text-stone-800 outline-none transition-colors focus:border-red-500 xs:min-h-14 xs:px-4 xs:text-xl"
                 placeholder="确认注销"
               />
             </label>
@@ -497,7 +507,7 @@ function SettingsPanel({
               <button
                 type="submit"
                 disabled={!canSubmitDeletion || deleteSubmitting}
-                className="flex min-h-12 items-center gap-2 rounded-xl bg-red-700 px-6 text-lg font-black text-white shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45"
+                className="flex min-h-10 items-center gap-2 rounded-xl bg-red-700 px-4 text-base font-black text-white shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 xs:min-h-12 xs:px-6 xs:text-lg"
               >
                 <Trash2 className="h-5 w-5" />
                 {deleteSubmitting ? "正在注销..." : "确认注销账号"}
@@ -639,15 +649,15 @@ function Index() {
   };
   // 模块：富主题换题控制。仅在后端判定当前主题足够丰富后出现，不改变原有语音主流程。
   const topicTransitionControls = pendingTopicTransition ? (
-    <div className="mx-auto mb-3 max-w-xl rounded-xl border border-amber-200 bg-white/85 p-2 shadow-sm">
-      <p className="text-base font-bold leading-relaxed text-stone-700">
+    <div className="mx-auto mb-3 min-w-0 max-w-xl rounded-xl border border-amber-200 bg-white/85 p-2 shadow-sm">
+      <p className="mobile-safe-text text-sm font-bold leading-relaxed text-stone-700 xs:text-base">
         {pendingTopicTransition.text}
       </p>
-      <div className="mt-3 grid grid-cols-2 gap-3">
+      <div className="mt-3 grid grid-cols-1 gap-2 xs:grid-cols-2 xs:gap-3">
         <button
           type="button"
           onClick={() => respondTopicTransition("continue")}
-          className="flex min-h-10 items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white px-3 text-base font-black text-stone-700 transition-colors hover:bg-stone-50 active:scale-[0.98]"
+          className="flex min-h-10 min-w-0 items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white px-3 text-sm font-black text-stone-700 transition-colors hover:bg-stone-50 active:scale-[0.98] xs:text-base"
         >
           <RefreshCw className="h-5 w-5" />
           继续这个主题
@@ -655,7 +665,7 @@ function Index() {
         <button
           type="button"
           onClick={handleTopicTransitionSecondary}
-          className="flex min-h-10 items-center justify-center gap-2 rounded-lg bg-amber-400 px-3 text-base font-black text-stone-900 transition-colors hover:bg-amber-300 active:scale-[0.98]"
+          className="flex min-h-10 min-w-0 items-center justify-center gap-2 rounded-lg bg-amber-400 px-3 text-sm font-black text-stone-900 transition-colors hover:bg-amber-300 active:scale-[0.98] xs:text-base"
         >
           {pendingTopicTransition.nextTopicId ? (
             <ArrowRight className="h-5 w-5" />
@@ -737,30 +747,30 @@ function Index() {
   // 模块：移动端主内容。手机端只渲染当前模块，避免桌面三栏压缩到窄屏。
   const mobileMainContent =
     activeTab === "organizer" ? (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden px-4 py-4">
+      <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden px-3 py-3 xs:px-4 xs:py-4">
         <header className="shrink-0 border-b border-amber-200 pb-4">
           <h2 className="text-2xl font-black text-stone-900">回忆库</h2>
           <p className="mt-1 text-base font-semibold text-stone-600">AI 帮您把刚刚讲过的回忆收好</p>
         </header>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-4">
+        <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto py-4">
           {!archive ? (
-            <div className="rounded-2xl bg-white/85 p-5 text-center shadow-sm">
+            <div className="min-w-0 rounded-2xl bg-white/85 p-4 text-center shadow-sm xs:p-5">
               <p className="text-lg font-bold text-stone-600">正在整理您的回忆...</p>
             </div>
           ) : (
             <>
-              <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-amber-100">
+              <section className="min-w-0 max-w-full rounded-2xl bg-white p-3 shadow-sm ring-1 ring-amber-100 xs:p-4">
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center gap-3">
                     <BookOpen className="h-6 w-6 text-amber-700" />
                     <h3 className="text-xl font-black text-stone-800">我的回忆录</h3>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2 xs:grid-cols-2">
                     <button
                       onClick={handleGenerateBiography}
                       disabled={biographyGenerating}
-                      className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-stone-800 px-3 text-sm font-black text-amber-50 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                      className="flex min-h-12 min-w-0 items-center justify-center gap-2 rounded-xl bg-stone-800 px-3 text-sm font-black text-amber-50 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <Sparkles
                         className={`h-5 w-5 shrink-0 ${biographyGenerating ? "animate-spin" : ""}`}
@@ -770,7 +780,7 @@ function Index() {
                     <button
                       onClick={handleOpenDownloadBiography}
                       disabled={!!biographyDownloading}
-                      className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-100 px-3 text-sm font-black text-stone-900 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                      className="flex min-h-12 min-w-0 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-100 px-3 text-sm font-black text-stone-900 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <Download className="h-5 w-5 shrink-0" />
                       下载我的回忆录
@@ -780,11 +790,11 @@ function Index() {
 
                 {latestBiography ? (
                   <div className="mt-4 space-y-3">
-                    <div className="rounded-xl bg-amber-50 p-3">
-                      <p className="text-xl font-black text-stone-900">
+                    <div className="min-w-0 rounded-xl bg-amber-50 p-3">
+                      <p className="mobile-safe-text min-w-0 text-lg font-black text-stone-900 xs:text-xl">
                         《{latestBiography.title || "我的回忆录"}》
                       </p>
-                      <p className="mt-1 text-base font-semibold text-stone-600">
+                      <p className="mobile-safe-text mt-1 text-base font-semibold text-stone-600">
                         {formatArchiveDate(
                           latestBiography.updatedAt || latestBiography.createdAt,
                         ) || "最近整理"}
@@ -799,12 +809,12 @@ function Index() {
                         {(latestBiography.chapters || []).map((chapter) => (
                           <article
                             key={`${chapter.number}-${chapter.title}`}
-                            className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-amber-100"
+                            className="min-w-0 rounded-xl bg-white p-3 shadow-sm ring-1 ring-amber-100"
                           >
-                            <p className="text-lg font-black text-stone-800">
+                            <p className="mobile-safe-text text-base font-black text-stone-800 xs:text-lg">
                               第 {chapter.number} 章：{chapter.title}
                             </p>
-                            <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-stone-600">
+                            <p className="mobile-safe-text mt-2 whitespace-pre-wrap text-base leading-relaxed text-stone-600">
                               {chapter.content}
                             </p>
                           </article>
@@ -817,13 +827,13 @@ function Index() {
                     )}
                   </div>
                 ) : (
-                  <p className="mt-4 text-base leading-relaxed text-stone-600">
+                  <p className="mobile-safe-text mt-4 text-base leading-relaxed text-stone-600">
                     还没有生成回忆录。等至少一个主题进度达到 85% 后，我就可以帮您整理成一版故事。
                   </p>
                 )}
               </section>
 
-              <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-amber-100">
+              <section className="min-w-0 max-w-full rounded-2xl bg-white p-3 shadow-sm ring-1 ring-amber-100 xs:p-4">
                 <div className="flex items-center gap-3">
                   <BookOpen className="h-6 w-6 text-amber-700" />
                   <h3 className="text-xl font-black text-stone-800">故事片段</h3>
@@ -833,10 +843,12 @@ function Index() {
                     archive.storySnippets.map((story) => (
                       <article
                         key={`${story.sourceId}-${story.title}`}
-                        className="rounded-xl bg-amber-50/80 p-3"
+                        className="min-w-0 rounded-xl bg-amber-50/80 p-3"
                       >
-                        <p className="text-lg font-black text-stone-800">{story.title}</p>
-                        <p className="mt-1 text-base leading-relaxed text-stone-600">
+                        <p className="mobile-safe-text text-base font-black text-stone-800 xs:text-lg">
+                          {story.title}
+                        </p>
+                        <p className="mobile-safe-text mt-1 text-base leading-relaxed text-stone-600">
                           {story.text}
                         </p>
                       </article>
@@ -853,7 +865,7 @@ function Index() {
     ) : activeTab === "settings" ? (
       <div
         data-mobile-settings
-        className="h-full overflow-y-auto px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]"
+        className="h-full min-w-0 overflow-y-auto px-3 py-3 pb-[calc(1rem+env(safe-area-inset-bottom))] xs:px-4 xs:py-4"
       >
         <SettingsPanel
           user={user}
@@ -864,28 +876,33 @@ function Index() {
         />
       </div>
     ) : activeTab === "family" ? (
-      <div className="h-full overflow-y-auto px-4 py-4">
+      <div className="h-full min-w-0 overflow-y-auto px-3 py-3 xs:px-4 xs:py-4">
         <FamilyConnectionPanel />
       </div>
     ) : activeTab !== "story" ? (
-      <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-        <h2 className="text-3xl font-black text-stone-800">{TAB_TITLES[activeTab]}</h2>
-        <p className="mt-3 text-xl leading-relaxed text-stone-600">此功能正在建设中……</p>
+      <div className="flex h-full min-w-0 flex-col items-center justify-center px-4 text-center xs:px-6">
+        <h2 className="mobile-safe-text text-2xl font-black text-stone-800 xs:text-3xl">
+          {TAB_TITLES[activeTab]}
+        </h2>
+        <p className="mt-3 text-base leading-relaxed text-stone-600 xs:text-xl">
+          此功能正在建设中……
+        </p>
       </div>
     ) : (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <header className="shrink-0 border-b border-amber-200 px-4 py-2">
+      <div className="flex h-full min-h-0 min-w-0 max-w-full flex-col overflow-hidden overflow-x-hidden">
+        <header className="shrink-0 border-b border-amber-200 px-3 py-2 xs:px-4">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h2 className="text-[22px] font-black leading-tight text-stone-900">
+            <h2 className="mobile-safe-text min-w-0 text-xl font-black leading-tight text-stone-900 xs:text-[22px]">
               {memoirTitle}
             </h2>
-            <p className="text-sm font-bold leading-tight text-stone-500">
-              · {companionStatsText}
-            </p>
+            <p className="text-sm font-bold leading-tight text-stone-500">· {companionStatsText}</p>
           </div>
         </header>
 
-        <div ref={chatScrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        <div
+          ref={chatScrollRef}
+          className="min-h-0 min-w-0 max-w-full flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-3 xs:p-4"
+        >
           {chatHistory.map((m) => (
             <ChatMessageBubble
               key={m.id}
@@ -896,12 +913,12 @@ function Index() {
           ))}
 
           {convoState === "aiThinking" && (
-            <div className="flex items-start gap-3">
+            <div className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2 overflow-x-hidden xs:gap-3">
               <div className="flex h-9 w-9 shrink-0 animate-pulse items-center justify-center rounded-full bg-stone-200 shadow-sm">
                 <Bot className="h-5 w-5 text-stone-700" />
               </div>
-              <div className="rounded-2xl rounded-tl-none border border-orange-100 bg-white p-4 shadow-sm">
-                <p className="animate-pulse text-lg leading-relaxed text-orange-600">
+              <div className="mobile-safe-text min-w-0 max-w-full justify-self-start rounded-2xl rounded-tl-none border border-orange-100 bg-white p-3 shadow-sm xs:p-4">
+                <p className="animate-pulse text-base leading-relaxed text-orange-600 xs:text-lg">
                   {aiThinkingText}
                 </p>
               </div>
@@ -913,12 +930,14 @@ function Index() {
     );
 
   const biographyStyleDialog = styleDialogOpen ? (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/55 p-6">
-      <div className="w-full max-w-2xl rounded-3xl bg-white p-7 shadow-2xl">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-black text-stone-900">选择回忆录文风</h2>
-            <p className="mt-2 text-base leading-relaxed text-stone-500">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/55 p-3 xs:p-6">
+      <div className="w-full max-w-2xl rounded-3xl bg-white p-4 shadow-2xl xs:p-7">
+        <div className="flex items-start justify-between gap-3 xs:gap-4">
+          <div className="min-w-0">
+            <h2 className="mobile-safe-text text-xl font-black text-stone-900 xs:text-2xl">
+              选择回忆录文风
+            </h2>
+            <p className="mobile-safe-text mt-2 text-sm leading-relaxed text-stone-500 xs:text-base">
               请选择这次生成回忆录的表达方式。
             </p>
           </div>
@@ -939,21 +958,25 @@ function Index() {
                 key={style.id}
                 type="button"
                 onClick={() => handleSelectBiographyStyle(style.id)}
-                className={`rounded-2xl border p-5 text-left transition-transform hover:scale-[1.02] active:scale-[0.98] ${
+                className={`min-w-0 rounded-2xl border p-4 text-left transition-transform hover:scale-[1.02] active:scale-[0.98] xs:p-5 ${
                   recommended
                     ? "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
                     : "border-stone-200 bg-white hover:bg-stone-50"
                 }`}
               >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xl font-black text-stone-900">{style.label}</p>
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <p className="mobile-safe-text min-w-0 text-lg font-black text-stone-900 xs:text-xl">
+                    {style.label}
+                  </p>
                   {recommended && (
                     <span className="rounded-full bg-amber-600 px-2.5 py-1 text-xs font-bold text-white">
                       默认
                     </span>
                   )}
                 </div>
-                <p className="mt-2 text-base leading-relaxed text-stone-600">{style.description}</p>
+                <p className="mobile-safe-text mt-2 text-base leading-relaxed text-stone-600">
+                  {style.description}
+                </p>
               </button>
             );
           })}
@@ -963,12 +986,14 @@ function Index() {
   ) : null;
 
   const biographyDownloadDialog = downloadDialogOpen ? (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/55 p-6">
-      <div className="w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-black text-stone-900">下载我的回忆录</h2>
-            <p className="mt-2 text-base leading-relaxed text-stone-500">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/55 p-3 xs:p-6">
+      <div className="w-full max-w-md rounded-3xl bg-white p-4 shadow-2xl xs:p-7">
+        <div className="flex items-start justify-between gap-3 xs:gap-4">
+          <div className="min-w-0">
+            <h2 className="mobile-safe-text text-xl font-black text-stone-900 xs:text-2xl">
+              下载我的回忆录
+            </h2>
+            <p className="mobile-safe-text mt-2 text-sm leading-relaxed text-stone-500 xs:text-base">
               请选择下载格式。PDF 适合分享和打印，Word 适合家人继续编辑。
             </p>
           </div>
@@ -986,7 +1011,7 @@ function Index() {
             type="button"
             onClick={() => void handleDownloadBiography("pdf")}
             disabled={!!biographyDownloading}
-            className="flex min-h-14 items-center justify-center gap-3 rounded-2xl bg-stone-800 px-5 text-lg font-black text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
+            className="flex min-h-12 min-w-0 items-center justify-center gap-3 rounded-2xl bg-stone-800 px-4 text-base font-black text-amber-50 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100 xs:min-h-14 xs:px-5 xs:text-lg"
           >
             <Download className="h-5 w-5" />
             {biographyDownloading === "pdf" ? "正在准备 PDF..." : "下载 PDF"}
@@ -995,7 +1020,7 @@ function Index() {
             type="button"
             onClick={() => void handleDownloadBiography("docx")}
             disabled={!!biographyDownloading}
-            className="flex min-h-14 items-center justify-center gap-3 rounded-2xl border border-amber-300 bg-amber-100 px-5 text-lg font-black text-stone-900 shadow-sm transition-transform hover:scale-[1.02] hover:bg-amber-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
+            className="flex min-h-12 min-w-0 items-center justify-center gap-3 rounded-2xl border border-amber-300 bg-amber-100 px-4 text-base font-black text-stone-900 shadow-sm transition-transform hover:scale-[1.02] hover:bg-amber-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100 xs:min-h-14 xs:px-5 xs:text-lg"
           >
             <Download className="h-5 w-5" />
             {biographyDownloading === "docx" ? "正在准备 Word..." : "下载 Word"}
@@ -1044,7 +1069,7 @@ function Index() {
   return (
     <main className="flex h-screen w-full gap-4 bg-amber-50 p-4 text-stone-900">
       {/* LEFT NAV */}
-      <aside className="flex w-[20%] flex-col rounded-3xl bg-stone-800 p-5 text-amber-50 shadow-lg">
+      <aside className="flex w-[20%] min-w-0 flex-col rounded-3xl bg-stone-800 p-5 text-amber-50 shadow-lg">
         <div className="mb-8 px-2 pt-2">
           <h1 className="text-3xl font-bold tracking-wide">回忆录</h1>
           <p className="mt-1 text-lg text-amber-200/80">Memory Book</p>
@@ -1079,7 +1104,7 @@ function Index() {
 
       {/* MAIN WORKBENCH */}
       <section
-        className={`flex flex-col rounded-3xl bg-amber-50 p-8 relative ${
+        className={`relative flex min-w-0 flex-col rounded-3xl bg-amber-50 p-8 ${
           showDesktopTopicSidebar ? "w-[55%]" : "flex-1"
         }`}
         style={{ boxShadow: "inset 0 4px 24px rgba(120, 72, 30, 0.18)" }}
@@ -1395,7 +1420,7 @@ function Index() {
       {showDesktopTopicSidebar && (
         <aside
           data-desktop-topic-sidebar
-          className="flex w-[25%] flex-col rounded-3xl bg-amber-100/70 p-5 shadow-md"
+          className="flex w-[25%] min-w-0 flex-col rounded-3xl bg-amber-100/70 p-5 shadow-md"
         >
           <div className="mb-4">
             <p className="text-lg font-semibold text-stone-600">今天想聊哪个主题？</p>

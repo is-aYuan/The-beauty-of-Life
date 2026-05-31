@@ -17,7 +17,9 @@ test('settings font scale controls expose four presets and wider slider labels',
     assert.match(routeSource, /\{ id: "normal", label: "标准" \}/);
     assert.match(routeSource, /\{ id: "large", label: "大" \}/);
     assert.match(routeSource, /\{ id: "extraLarge", label: "特大" \}/);
-    assert.match(routeSource, /options\.length === 4 \? "grid-cols-4" : "grid-cols-3"/);
+    assert.match(routeSource, /grid-cols-2/);
+    assert.match(routeSource, /options\.length === 4 \? "sm:grid-cols-4" : "sm:grid-cols-3"/);
+    assert.match(routeSource, /xs:px-4 xs:py-4 xs:text-xl/);
     assert.match(routeSource, />更小</);
     assert.match(routeSource, />更大</);
 });

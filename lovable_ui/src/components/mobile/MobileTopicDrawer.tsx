@@ -44,10 +44,12 @@ export function MobileTopicDrawer({
   }
 
   const currentTopicSummary = (
-    <span className="flex min-w-0 items-center gap-2">
-      <span className="shrink-0 text-sm font-bold text-stone-500">聊天主题：</span>
-      <span className="truncate text-lg font-black text-stone-900">{currentTopic.title}</span>
-      <span className="shrink-0 rounded-full bg-amber-200 px-2 py-0.5 text-xs font-black text-stone-800">
+    <span className="flex min-w-0 items-center gap-1.5 xs:gap-2">
+      <span className="shrink-0 text-xs font-bold text-stone-500 xs:text-sm">聊天主题：</span>
+      <span className="min-w-0 truncate text-base font-black text-stone-900 xs:text-lg">
+        {currentTopic.title}
+      </span>
+      <span className="shrink-0 rounded-full bg-amber-200 px-1.5 py-0.5 text-[10px] font-black text-stone-800 xs:px-2 xs:text-xs">
         {currentProgress}%
       </span>
     </span>
@@ -60,7 +62,7 @@ export function MobileTopicDrawer({
       }`}
     >
       {expanded ? (
-        <div className="grid min-h-[52px] w-full grid-cols-1 items-center px-4 py-2 text-left">
+        <div className="grid min-h-[44px] w-full min-w-0 grid-cols-1 items-center px-3 py-2 text-left xs:min-h-[52px] xs:px-4">
           {currentTopicSummary}
         </div>
       ) : (
@@ -69,10 +71,10 @@ export function MobileTopicDrawer({
           aria-expanded={expanded}
           disabled={disabled}
           onClick={onToggle}
-          className="grid min-h-[52px] w-full grid-cols-[1fr_auto] items-center gap-3 px-4 py-2 text-left disabled:opacity-70"
+          className="grid min-h-[44px] w-full min-w-0 grid-cols-[1fr_auto] items-center gap-2 px-3 py-2 text-left disabled:opacity-70 xs:min-h-[52px] xs:gap-3 xs:px-4"
         >
           {currentTopicSummary}
-          <span className="flex items-center gap-1 rounded-full bg-white px-3 py-2 text-sm font-black text-stone-700 shadow-sm ring-1 ring-amber-100">
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-white px-2.5 py-1.5 text-xs font-black text-stone-700 shadow-sm ring-1 ring-amber-100 xs:px-3 xs:py-2 xs:text-sm">
             换主题
             <ChevronDown className="h-4 w-4 transition-transform" />
           </span>
@@ -84,9 +86,9 @@ export function MobileTopicDrawer({
           {/* 模块：主题选择模式。中间主题网格独立滚动，底部仅保留收起入口。 */}
           <div
             data-mobile-topic-scroll
-            className="min-h-0 flex-1 overflow-y-auto border-t border-amber-100 px-3 pb-4 pt-2"
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto border-t border-amber-100 px-2 pb-4 pt-2 xs:px-3"
           >
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-1.5 xs:grid-cols-2 xs:gap-2">
               {topics.map((topic) => {
                 const active = topic.id === currentTopicId;
                 const progress = Math.max(0, Math.min(100, topic.progress || 0));
@@ -96,13 +98,13 @@ export function MobileTopicDrawer({
                     key={topic.id}
                     type="button"
                     onClick={() => onSelectTopic(topic.id)}
-                    className={`rounded-2xl border p-3 text-left transition-transform active:scale-[0.98] ${
+                    className={`min-w-0 rounded-2xl border p-2 text-left transition-transform active:scale-[0.98] xs:p-3 ${
                       active
                         ? "border-[#F5D76B] bg-[#FFEA92] text-[#241F1C] shadow-[0_10px_24px_rgba(160,120,30,0.18)]"
                         : "border-amber-100 bg-white text-stone-800 shadow-sm"
                     }`}
                   >
-                    <span className="block min-h-10 text-base font-black leading-snug">
+                    <span className="mobile-safe-text block min-h-8 text-sm font-black leading-snug xs:min-h-10 xs:text-base">
                       {topic.title}
                     </span>
                     <span className="mt-2 flex items-center gap-2">
@@ -123,7 +125,7 @@ export function MobileTopicDrawer({
                         />
                       </span>
                       <span
-                        className={`w-9 text-right text-xs font-black ${
+                        className={`w-8 text-right text-[10px] font-black xs:w-9 xs:text-xs ${
                           active ? "text-[#241F1C]" : "text-stone-700"
                         }`}
                       >
@@ -131,7 +133,7 @@ export function MobileTopicDrawer({
                       </span>
                     </span>
                     <span
-                      className={`mt-1 block text-xs font-bold ${
+                      className={`mt-1 block text-[10px] font-bold xs:text-xs ${
                         active ? "text-[#5F4A00]" : "text-stone-500"
                       }`}
                     >
@@ -149,7 +151,7 @@ export function MobileTopicDrawer({
             <button
               type="button"
               onClick={onCollapse}
-              className="min-h-12 w-full rounded-2xl border border-[#F5D76B] bg-[#FFEA92] text-base font-black text-[#241F1C] shadow-[0_10px_24px_rgba(160,120,30,0.18)] active:scale-[0.98]"
+              className="min-h-10 w-full rounded-2xl border border-[#F5D76B] bg-[#FFEA92] text-sm font-black text-[#241F1C] shadow-[0_10px_24px_rgba(160,120,30,0.18)] active:scale-[0.98] xs:min-h-12 xs:text-base"
             >
               收起
             </button>

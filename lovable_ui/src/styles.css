@@ -4,6 +4,10 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@theme {
+  --breakpoint-xs: 375px;
+}
+
 /*
  * Design system definition.
  *
@@ -133,12 +137,34 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   * {
+    box-sizing: border-box;
     border-color: var(--color-border);
   }
 
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
   body {
+    min-width: 0;
     background-color: var(--color-background);
     color: var(--color-foreground);
+  }
+}
+
+@layer utilities {
+  /* 模块：小屏防溢出文本。用于用户输入、AI 回复、标题和长数字混排。 */
+  .mobile-safe-text {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 }

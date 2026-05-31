@@ -70,8 +70,10 @@ test('frontend exposes text input mode and sends typed messages through websocke
 test('text input mode uses a large single input frame without an outer shadow box', () => {
     const source = fs.readFileSync(textInputComposerPath, 'utf8');
 
-    assert.match(source, /min-h-\[60px\]/);
-    assert.match(source, /h-\[60px\] w-\[60px\]/);
+    assert.match(source, /min-h-\[48px\]/);
+    assert.match(source, /xs:min-h-\[60px\]/);
+    assert.match(source, /h-12 w-12/);
+    assert.match(source, /xs:h-\[60px\] xs:w-\[60px\]/);
     assert.doesNotMatch(source, /shadow-\[0_8px_18px_rgba\(160,120,30,0\.12\)\]/);
     assert.doesNotMatch(source, /bg-white\/90 p-2/);
 });
@@ -90,8 +92,14 @@ test('recorder controls hide idle guidance copy for every idle input mode', () =
     const routeSource = fs.readFileSync(routePath, 'utf8');
     const recorderSource = fs.readFileSync(recorderPath, 'utf8');
 
-    assert.match(routeSource, /const showDesktopStatusLine = convoState !== "idle" \|\| networkStatus === "offline"/);
-    assert.match(recorderSource, /const showStatusLine = convoState !== "idle" \|\| offline \|\| \(recordMode !== "text" && !!recorderError\)/);
+    assert.match(
+        routeSource,
+        /const showDesktopStatusLine = convoState !== "idle" \|\| networkStatus === "offline"/,
+    );
+    assert.match(
+        recorderSource,
+        /const showStatusLine =\s*convoState !== "idle" \|\| offline \|\| \(recordMode !== "text" && !!recorderError\)/,
+    );
     assert.doesNotMatch(routeSource, /entryGuidance\.idleStatus/);
     assert.doesNotMatch(recorderSource, /\{idleStatus\}/);
 });

@@ -92,7 +92,7 @@ export function MobileAppShell<T extends string>({
   );
 
   return (
-    <main className="flex h-dvh w-full flex-col overflow-hidden bg-amber-50 text-stone-900">
+    <main className="flex h-[100svh] max-h-[100svh] min-w-0 w-full max-w-full flex-col overflow-hidden overflow-x-hidden bg-amber-50 text-stone-900">
       <MobileModuleSwitcher
         tabs={tabs}
         activeTab={activeTab}
@@ -100,7 +100,9 @@ export function MobileAppShell<T extends string>({
         onLogout={onLogout}
       />
 
-      <section className="min-h-0 flex-1 overflow-hidden">{children}</section>
+      <section className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden overflow-x-hidden">
+        {children}
+      </section>
 
       {storyActive && (
         <>
@@ -115,7 +117,10 @@ export function MobileAppShell<T extends string>({
             getStatusLabel={getTopicStatusLabel}
           />
           {!topicExpanded && (
-            <div style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+            <div
+              className="min-w-0 shrink-0 overflow-x-hidden"
+              style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+            >
               <RecorderControls
                 recordMode={recordMode}
                 convoState={convoState}
