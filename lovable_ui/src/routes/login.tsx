@@ -240,12 +240,13 @@ function LoginPage() {
         </form>
 
         {!needsPasswordSetup && (
-          <p
+          <button
+            type="button"
             onClick={switchMode}
-            className="mobile-safe-text mt-6 cursor-pointer text-center text-base text-stone-400 transition-colors hover:text-amber-300 xs:text-lg"
+            className="mobile-safe-text mt-6 flex min-h-12 w-full min-w-0 items-center justify-center rounded-xl bg-white/8 px-4 text-center text-base font-bold text-amber-100 ring-1 ring-amber-200/20 transition-colors hover:bg-white/12 hover:text-amber-200 active:scale-[0.98] xs:text-lg"
           >
-            {isLogin ? "第一次使用？点击这里登记" : "已有专属日记本？返回开锁"}
-          </p>
+            {isLogin ? "第一次使用？ 点击注册新账号" : "已有专属日记本？ 返回登录"}
+          </button>
         )}
       </div>
 
