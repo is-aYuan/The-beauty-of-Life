@@ -42,7 +42,7 @@ test('text mode bypasses speech synthesis while voice mode keeps it enabled', ()
 
     assert.match(source, /shouldSpeak: true/);
     assert.match(source, /if \(shouldSpeak\) \{/);
-    assert.match(source, /synthesizeSpeech\(aiReply, session\.userPreferences\)/);
+    assert.match(source, /synthesizeSpeech\(aiReply, session\.userPreferences/);
 });
 
 test('frontend exposes text input mode and sends typed messages through websocket', () => {
@@ -52,6 +52,8 @@ test('frontend exposes text input mode and sends typed messages through websocke
 
     assert.match(engineSource, /sendTextMessage/);
     assert.match(engineSource, /user_text_message/);
+    assert.match(engineSource, /createTurnId\("text"\)/);
+    assert.match(engineSource, /turnId,/);
     assert.match(engineSource, /enterTextInputMode/);
     assert.match(engineSource, /ignoreIncomingAudioRef/);
     assert.match(routeSource, /type RecordMode = "hold" \| "table" \| "text"/);

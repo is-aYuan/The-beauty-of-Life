@@ -520,6 +520,7 @@ function Index() {
     wsConnected,
     networkStatus,
     convoState,
+    aiThinkingText,
     inputMode,
     subtitle,
     topicProfile,
@@ -901,7 +902,7 @@ function Index() {
               </div>
               <div className="rounded-2xl rounded-tl-none border border-orange-100 bg-white p-4 shadow-sm">
                 <p className="animate-pulse text-lg leading-relaxed text-orange-600">
-                  我在帮您整理故事，马上就好...
+                  {aiThinkingText}
                 </p>
               </div>
             </div>
@@ -1015,6 +1016,7 @@ function Index() {
           currentTopicId={topicProfile?.currentTopicId}
           recordMode={recordMode}
           convoState={convoState}
+          aiThinkingText={aiThinkingText}
           networkStatus={networkStatus}
           frequencyData={frequencyData}
           recorderError={recorderError}
@@ -1239,7 +1241,7 @@ function Index() {
                   </div>
                   <div className="rounded-3xl rounded-tl-none bg-white p-5 shadow-md border border-orange-100">
                     <p className="text-2xl leading-relaxed text-orange-600 animate-pulse">
-                      我在帮您整理故事，马上就好...
+                      {aiThinkingText}
                     </p>
                   </div>
                 </div>

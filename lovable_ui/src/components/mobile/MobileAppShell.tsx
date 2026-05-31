@@ -16,6 +16,7 @@ type MobileAppShellProps<T extends string> = {
   currentTopicId?: string | null;
   recordMode: RecordMode;
   convoState: ConversationState;
+  aiThinkingText?: string;
   networkStatus: string;
   frequencyData: Uint8Array | null;
   recorderError: string;
@@ -43,6 +44,7 @@ export function MobileAppShell<T extends string>({
   currentTopicId,
   recordMode,
   convoState,
+  aiThinkingText,
   networkStatus,
   frequencyData,
   recorderError,
@@ -117,6 +119,7 @@ export function MobileAppShell<T extends string>({
               <RecorderControls
                 recordMode={recordMode}
                 convoState={convoState}
+                aiThinkingText={aiThinkingText}
                 networkStatus={networkStatus}
                 frequencyData={frequencyData}
                 recorderError={recorderError}

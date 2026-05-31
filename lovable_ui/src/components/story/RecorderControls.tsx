@@ -9,6 +9,7 @@ type RecorderAction = () => void | boolean | Promise<void | boolean>;
 type RecorderControlsProps = {
   recordMode: RecordMode;
   convoState: ConversationState;
+  aiThinkingText?: string;
   networkStatus: string;
   frequencyData: Uint8Array | null;
   recorderError: string;
@@ -51,6 +52,7 @@ function MiniVisualizer({ freqData }: { freqData: Uint8Array | null }) {
 export function RecorderControls({
   recordMode,
   convoState,
+  aiThinkingText = "正在整理故事...",
   networkStatus,
   frequencyData,
   recorderError,
@@ -146,7 +148,7 @@ export function RecorderControls({
               <MiniVisualizer freqData={frequencyData} />
             </>
           ) : convoState === "aiThinking" ? (
-            <p className="animate-pulse text-sm font-black text-orange-600">正在整理故事...</p>
+            <p className="animate-pulse text-sm font-black text-orange-600">{aiThinkingText}</p>
           ) : convoState === "aiTalking" ? (
             <p className="text-sm font-black text-blue-600">AI 正在朗读回应...</p>
           ) : null}
@@ -218,7 +220,7 @@ export function RecorderControls({
       {convoState === "aiThinking" && (
         <div className="flex min-h-[60px] w-full items-center justify-center gap-2 rounded-2xl border border-[#E9D78F] bg-[#F8E8B2] px-5 text-xl font-black text-[#6B5A2A] shadow-[0_8px_18px_rgba(160,120,30,0.1)]">
           <Sparkles className="h-7 w-7 animate-spin" />
-          正在整理...
+          {aiThinkingText}
         </div>
       )}
     </section>

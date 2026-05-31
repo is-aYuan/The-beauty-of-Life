@@ -95,6 +95,7 @@ export function useStoryEngine() {
   const [wsConnected, setWsConnected] = useState(false);
   const [networkStatus, setNetworkStatus] = useState<"online" | "offline">("offline");
   const [convoState, setConvoState] = useState<ConvoState>("idle");
+  const [aiThinkingText, setAiThinkingText] = useState("我在接着整理您的故事...");
   const [inputMode, setInputMode] = useState<"voice" | "text">("voice");
   const [subtitle, setSubtitle] = useState("");
   const [recorderError, setRecorderError] = useState("");
@@ -154,6 +155,19 @@ export function useStoryEngine() {
   useEffect(() => {
     inputModeRef.current = inputMode;
   }, [inputMode]);
+
+  useEffect(() => {
+    if (convoState !== "aiThinking") {
+      setAiThinkingText("我在接着整理您的故事...");
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setAiThinkingText("网络有点慢，我正在换个方式接上...");
+    }, 12000);
+
+    return () => window.clearTimeout(timer);
+  }, [convoState]);
 
   // User auth management
   useEffect(() => {
@@ -478,8 +492,13 @@ export function useStoryEngine() {
   }, [initAudioContext]);
 
   // 模块：语音轮次协议。每次录音都有独立 turnId，避免长录音和旧 WebSocket 音频串线。
-  const createVoiceTurnId = () =>
-    `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const createTurnId = (prefix: "voice" | "text") =>
+    `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+  const requestLatestTurnRecovery = () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: "recover_latest_turn" }));
+  };
 
   // 模块：WebSocket 生命周期管理。区分主动关闭和异常掉线，避免清理旧连接时触发重连循环。
   const clearReconnectTimer = useCallback(() => {
@@ -599,9 +618,23 @@ export function useStoryEngine() {
   const handleJsonMessage = (jsonStr: string) => {
     try {
       const msg = JSON.parse(jsonStr);
-      const appendAiMessage = (text?: string) => {
+      const appendAiMessage = (text?: string, turnId?: string) => {
         if (!text) return;
-        setChatHistory((prev) => [...prev, { id: Date.now(), role: "ai", text }]);
+        setChatHistory((prev) => {
+          if (turnId && prev.some((item) => item.role === "ai" && item.turnId === turnId)) {
+            return prev;
+          }
+          return [...prev, { id: Date.now(), role: "ai", text, turnId }];
+        });
+      };
+      const appendUserMessage = (text?: string, turnId?: string) => {
+        if (!text) return;
+        setChatHistory((prev) => {
+          if (turnId && prev.some((item) => item.role === "user" && item.turnId === turnId)) {
+            return prev;
+          }
+          return [...prev, { id: Date.now(), role: "user", text, turnId }];
+        });
       };
 
       if (msg.event === "input_mode_updated") {
@@ -614,7 +647,36 @@ export function useStoryEngine() {
 
       if (msg.event === "ai_text_response") {
         const text = msg.text || "";
-        appendAiMessage(text);
+        appendAiMessage(text, msg.turnId);
+        setSubtitle(text);
+        setConvoState("idle");
+        fetchStats();
+        fetchArchive();
+        return;
+      }
+
+      if (msg.event === "turn_accepted" || msg.event === "turn_busy") {
+        setAiThinkingText(msg.text || "我在接着整理您的故事...");
+        setConvoState("aiThinking");
+        return;
+      }
+
+      if (msg.event === "turn_completed") {
+        const text = msg.text || "";
+        appendAiMessage(text, msg.turnId);
+        setSubtitle(text);
+        setConvoState(msg.status === "ai_speaking" ? "aiTalking" : "idle");
+        if (msg.status === "ready") {
+          fetchStats();
+          fetchArchive();
+        }
+        return;
+      }
+
+      if (msg.event === "turn_recovered") {
+        const text = msg.text || "";
+        appendUserMessage(msg.userText, msg.turnId);
+        appendAiMessage(text, msg.turnId);
         setSubtitle(text);
         setConvoState("idle");
         fetchStats();
@@ -653,6 +715,7 @@ export function useStoryEngine() {
           setTopicProfile(createFallbackTopicProfile(msg.user.userId));
         }
         fetchStats();
+        requestLatestTurnRecovery();
       }
       if (msg.event === "topic_profile_updated" && msg.topicProfile) {
         setTopicProfile(msg.topicProfile);
@@ -711,7 +774,7 @@ export function useStoryEngine() {
       if (msg.text) {
         setSubtitle(msg.text);
         if (msg.status === "ai_speaking") {
-          appendAiMessage(msg.text);
+          appendAiMessage(msg.text, msg.turnId);
         }
       }
 
@@ -862,7 +925,7 @@ export function useStoryEngine() {
     explicitStopCallbackRef.current = onStop || null;
 
     const voiceTurn = {
-      turnId: createVoiceTurnId(),
+      turnId: createTurnId("voice"),
       mode,
     };
     activeVoiceTurnRef.current = voiceTurn;
@@ -1069,12 +1132,14 @@ export function useStoryEngine() {
 
     enterTextInputMode();
     setRecorderError("");
-    setChatHistory((prev) => [...prev, { id: Date.now(), role: "user", text: trimmed }]);
+    const turnId = createTurnId("text");
+    setChatHistory((prev) => [...prev, { id: Date.now(), role: "user", text: trimmed, turnId }]);
     setConvoState("aiThinking");
     wsRef.current.send(
       JSON.stringify({
         type: "user_text_message",
         inputMode: "text",
+        turnId,
         text: trimmed,
       }),
     );
@@ -1222,6 +1287,7 @@ export function useStoryEngine() {
     wsConnected,
     networkStatus,
     convoState,
+    aiThinkingText,
     inputMode,
     subtitle,
     hasBiography,

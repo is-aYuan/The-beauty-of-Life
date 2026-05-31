@@ -123,8 +123,21 @@ const {
     getProviderSummary,
 } = require('./lib/providerConfig');
 const {
-    createAiProvider,
+    createChatProviderEntries,
 } = require('./lib/ai');
+const {
+    completeChatWithFallback,
+    withTimeout,
+} = require('./lib/ai/fallbackChat');
+const {
+    buildLocalFallbackReply,
+} = require('./lib/ai/localFallbackReply');
+const {
+    createTurnTaskStore,
+} = require('./lib/turns/turnTaskStore');
+const {
+    runReliableTurn,
+} = require('./lib/turns/turnOrchestrator');
 const {
     createVoiceProvider,
 } = require('./lib/voice');
@@ -154,6 +167,7 @@ const tcbApp = cloudbase.init({
 const db = tcbApp.database();
 const _ = db.command; // 数据库操作符
 const usageRecorder = createUsageRecorder({ db });
+const turnTaskStore = createTurnTaskStore({ db });
 console.log('[CloudBase] 云数据库已连接');
 
 // ==================== 腾讯云 SDK 导入 ====================
@@ -194,9 +208,10 @@ const ttsClient = new TtsClient({
 });
 
 // ==================== AI/语音供应商路由 ====================
-const aiProvider = createAiProvider(PROVIDER_CONFIG, {
+const chatProviderEntries = createChatProviderEntries(PROVIDER_CONFIG, {
     hunyuanClient,
 });
+const aiProvider = chatProviderEntries[0].provider;
 
 const voiceProvider = createVoiceProvider(PROVIDER_CONFIG, {
     asrClient,
@@ -633,7 +648,7 @@ async function updateAdminUser(userId, input) {
 
 /**
  * 删除用户及其所有关联数据（级联删除）
- * 清理集合：conversations → summaries → memory_profiles → topic_profiles → biographies → sessions → user_preferences → user_consents → users
+ * 清理集合：conversations → summaries → memory_profiles → topic_profiles → biographies → sessions → user_preferences → user_consents → turn_tasks → users
  * 同时清理本地音频文件：data/records/{userId}
  */
 async function deleteUser(userId) {
@@ -661,6 +676,9 @@ async function deleteUser(userId) {
     const deletedConsents = await deleteCollectionDocsByUserId(db, 'user_consents', userId);
     console.log(`[删除] 已清理 ${deletedConsents} 条用户同意记录`);
 
+    const deletedTurnTasks = await deleteCollectionDocsByUserId(db, 'turn_tasks', userId);
+    console.log(`[删除] 已清理 ${deletedTurnTasks} 条对话任务状态`);
+
     const audioResult = deleteUserAudioFiles(AUDIO_ROOT, userId);
     console.log(`[删除] 本地音频目录${audioResult.deletedAudioDir ? '已清理' : '不存在'}: ${audioResult.audioDir}`);
 
@@ -676,6 +694,7 @@ async function deleteUser(userId) {
         deletedSessions,
         deletedPreferences,
         deletedConsents,
+        deletedTurnTasks,
         deletedAudioDir: audioResult.deletedAudioDir,
         deletedUser: true,
     };
@@ -736,6 +755,48 @@ async function saveConversation(sessionId, userId, record) {
         timestamp: db.serverDate(),
     });
     console.log(`[CloudBase] 对话记录已保存`);
+}
+
+// 模块：移动端单轮对话恢复协议。turnId 让断线重连后能补回最近一次 AI 回复。
+function isCompletedTurnStatus(status) {
+    return ['completed', 'completed_with_fallback', 'failed_local_fallback'].includes(status);
+}
+
+function isRecentTurn(turn, maxAgeMs = 15 * 60 * 1000) {
+    const updatedAt = Number(turn?.updatedAt || turn?.createdAt || 0);
+    return Number.isFinite(updatedAt) && Date.now() - updatedAt <= maxAgeMs;
+}
+
+function buildTurnEventPayload(event, turn) {
+    return {
+        event,
+        status: isCompletedTurnStatus(turn?.status) ? 'ready' : 'ai_thinking',
+        turnId: turn?.turnId || '',
+        inputMode: turn?.inputMode || '',
+        userText: turn?.userText || '',
+        text: turn?.aiText || '',
+        provider: turn?.provider || '',
+        fallbackLevel: turn?.fallbackLevel || 0,
+        turnStatus: turn?.status || '',
+        saveStatus: turn?.saveStatus || '',
+    };
+}
+
+async function recoverLatestTurnForSession(sessionId, session) {
+    if (!session.userId) return;
+    const latestTurn = await turnTaskStore.safeGetLatestRecoverableTurn(session.userId);
+    if (!latestTurn || !isRecentTurn(latestTurn)) return;
+
+    if (isCompletedTurnStatus(latestTurn.status) && latestTurn.aiText) {
+        sendJson(session.ws, buildTurnEventPayload('turn_recovered', latestTurn));
+        console.log(`[${sessionId}] 已恢复最近 turn ${latestTurn.turnId}`);
+        return;
+    }
+
+    if (latestTurn.status === 'accepted' || latestTurn.status === 'processing') {
+        sendJson(session.ws, buildTurnEventPayload('turn_accepted', latestTurn));
+        console.log(`[${sessionId}] 最近 turn ${latestTurn.turnId} 仍在处理中`);
+    }
 }
 
 /**
@@ -2632,6 +2693,9 @@ async function handleMessage(sessionId, session, msg) {
             speakEntryGuidance(sessionId, session, entry.entryGuidance).catch((err) => {
                 console.error(`[${sessionId}] 入口引导朗读失败:`, err.message || err);
             });
+            recoverLatestTurnForSession(sessionId, session).catch((err) => {
+                console.error(`[${sessionId}] 最近 turn 恢复失败:`, err.message || err);
+            });
         } else {
             sendJson(session.ws, {
                 status: 'login_failed',
@@ -2679,6 +2743,16 @@ async function handleMessage(sessionId, session, msg) {
                 text: result.message,
             });
         }
+        return;
+    }
+
+    // 移动端 WebSocket 重连后主动恢复最近一轮 turn，避免用户看到无限“正在整理”。
+    if (msg.type === 'recover_latest_turn') {
+        if (!session.userId) {
+            sendJson(session.ws, { status: 'need_login', text: '请先登录' });
+            return;
+        }
+        await recoverLatestTurnForSession(sessionId, session);
         return;
     }
 
@@ -2789,6 +2863,12 @@ async function handleMessage(sessionId, session, msg) {
 
         if (session.isProcessing) {
             console.log(`[${sessionId}] 上一轮还在处理中，跳过文本输入`);
+            sendJson(session.ws, {
+                event: 'turn_busy',
+                status: 'ai_thinking',
+                turnId: msg.turnId || '',
+                text: '上一段还在整理，我会接着处理。',
+            });
             return;
         }
 
@@ -2807,7 +2887,10 @@ async function handleMessage(sessionId, session, msg) {
         session.currentVoiceTurn = null;
         session.isProcessing = true;
         try {
-            await processTypedInteraction(sessionId, session, userText);
+            await processTypedInteraction(sessionId, session, userText, {
+                turnId: msg.turnId,
+                mode: 'text',
+            });
         } catch (err) {
             console.error(`[${sessionId}] 文本处理失败:`, err);
             sendJson(session.ws, {
@@ -2830,6 +2913,12 @@ async function handleMessage(sessionId, session, msg) {
 
         if (session.isProcessing) {
             console.log(`[${sessionId}] 上一轮还在处理中，跳过`);
+            sendJson(session.ws, {
+                event: 'turn_busy',
+                status: 'ai_thinking',
+                turnId: msg.turnId || '',
+                text: '上一段还在整理，我会接着处理。',
+            });
             return;
         }
 
@@ -3112,17 +3201,20 @@ async function processVoiceInteraction(sessionId, session, audioBuffer, turnMeta
         shouldSpeak: true,
         audioFile,
         audioSizeKB: Math.round(audioBuffer.length / 1024),
+        turnId: turnMeta.turnId,
+        turnMode: turnMeta.mode,
     });
 }
 
-async function processTypedInteraction(sessionId, session, userText) {
-    sendJson(session.ws, { status: 'ai_thinking' });
+async function processTypedInteraction(sessionId, session, userText, turnMeta = {}) {
     await processUserTextInteraction(sessionId, session, {
         userText,
         inputMode: 'text',
         shouldSpeak: false,
         audioFile: null,
         audioSizeKB: 0,
+        turnId: turnMeta.turnId,
+        turnMode: turnMeta.mode || 'text',
     });
 }
 
@@ -3133,8 +3225,13 @@ async function processUserTextInteraction(sessionId, session, {
     shouldSpeak,
     audioFile,
     audioSizeKB,
+    turnId,
+    turnMode,
 }) {
     const userId = session.userId;
+    const effectiveTurnId = typeof turnId === 'string' && turnId.trim()
+        ? turnId.trim()
+        : turnTaskStore.buildTurnId(inputMode || 'turn');
 
     if (session.topicTransitionPrompt) {
         const topicProfile = await getOrCreateTopicProfile(userId);
@@ -3155,12 +3252,41 @@ async function processUserTextInteraction(sessionId, session, {
         });
     }
 
+    const existingTurn = await turnTaskStore.safeFindByTurnId(effectiveTurnId, userId);
+    if (existingTurn && isCompletedTurnStatus(existingTurn.status) && existingTurn.aiText) {
+        sendJson(session.ws, buildTurnEventPayload('turn_recovered', existingTurn));
+        return;
+    }
+
+    await turnTaskStore.safeCreateAcceptedTurn({
+        turnId: effectiveTurnId,
+        userId,
+        sessionId,
+        inputMode,
+        userText,
+        mode: turnMode || inputMode,
+    });
+    sendJson(session.ws, {
+        event: 'turn_accepted',
+        status: 'ai_thinking',
+        turnId: effectiveTurnId,
+        inputMode,
+        text: '我在接着整理您的故事...',
+    });
+
     const answeredEntryGuidance = buildAnsweredEntryGuidanceTurn(session.pendingEntryGuidance);
     const answeredTopicOpening = buildAnsweredTopicSwitchOpeningTurn(session.pendingTopicOpening);
     const answeredRecommendationQuestion = buildAnsweredRecommendationQuestionTurn(session.pendingRecommendationQuestion);
     session.pendingAnsweredPrompt = answeredRecommendationQuestion || answeredTopicOpening || answeredEntryGuidance;
     const previousConversation = !session.pendingAnsweredPrompt && !session.lastAiPrompt
-        ? await getLatestConversationForAnsweredPrompt(sessionId, userId)
+        ? await withTimeout(
+            getLatestConversationForAnsweredPrompt(sessionId, userId),
+            3000,
+            'answered-prompt:previous-conversation',
+        ).catch((err) => {
+            console.warn(`[${sessionId}] 上一问恢复超时，继续本轮对话:`, err.message || err);
+            return null;
+        })
         : null;
     const persistedAnsweredPrompt = buildAnsweredPromptFromPreviousConversation(previousConversation);
     const answeredPrompt = resolveAnsweredPromptForTurn(session, persistedAnsweredPrompt);
@@ -3169,29 +3295,53 @@ async function processUserTextInteraction(sessionId, session, {
 
     // ── Step 2: 大模型对话 (混元) ──
     console.log(`[${sessionId}] Step 2: AI 对话中...`);
-    const aiReply = await chatWithAI(sessionId, session, userText, { answeredPrompt });
+    const topicProfile = await withTimeout(
+        getOrCreateTopicProfile(userId),
+        3000,
+        'topic-profile:load',
+    ).catch((err) => {
+        console.warn(`[${sessionId}] 主题档案读取超时，使用基础采访提示继续:`, err.message || err);
+        return null;
+    });
+    const selectedTopic = getSelectedTopic(topicProfile, session.currentTopicId);
+    const aiResult = await runReliableTurn({
+        store: turnTaskStore,
+        turn: {
+            turnId: effectiveTurnId,
+            userId,
+            sessionId,
+            inputMode,
+            userText,
+        },
+        runChat: () => chatWithAI(sessionId, session, userText, {
+            answeredPrompt,
+            topicProfile,
+            selectedTopic,
+        }),
+        saveTurn: async (chatResult) => saveConversation(sessionId, userId, {
+            ...(answeredPrompt || {}),
+            answeredAiPromptText: answeredPrompt?.answeredAiPromptText || '',
+            answeredAiPromptDisplayText: answeredPrompt?.answeredAiPromptDisplayText || '',
+            answeredAiPromptSource: answeredPrompt?.answeredAiPromptSource || '',
+            answeredAiPromptTopicId: answeredPrompt?.answeredAiPromptTopicId || '',
+            answeredAiPromptTopicTitle: answeredPrompt?.answeredAiPromptTopicTitle || '',
+            answeredAiPromptNextQuestion: answeredPrompt?.answeredAiPromptNextQuestion || '',
+            userText,
+            aiReply: chatResult.text,
+            inputMode,
+            audioFile,
+            audioSizeKB,
+            turnId: effectiveTurnId,
+            aiProvider: chatResult.provider || '',
+            aiFallbackLevel: chatResult.fallbackLevel || 0,
+            topicId: selectedTopic?.id || session.currentTopicId || DEFAULT_TOPIC_ID,
+            topicTitle: selectedTopic?.title || '',
+            topicProgress: selectedTopic?.progress || 0,
+        }),
+    });
+    const aiReply = aiResult.text;
     console.log(`[${sessionId}] AI 回复: "${aiReply}"`);
 
-    const topicProfile = await getOrCreateTopicProfile(userId);
-    const selectedTopic = getSelectedTopic(topicProfile, session.currentTopicId);
-
-    await saveConversation(sessionId, userId, {
-        ...(answeredPrompt || {}),
-        answeredAiPromptText: answeredPrompt?.answeredAiPromptText || '',
-        answeredAiPromptDisplayText: answeredPrompt?.answeredAiPromptDisplayText || '',
-        answeredAiPromptSource: answeredPrompt?.answeredAiPromptSource || '',
-        answeredAiPromptTopicId: answeredPrompt?.answeredAiPromptTopicId || '',
-        answeredAiPromptTopicTitle: answeredPrompt?.answeredAiPromptTopicTitle || '',
-        answeredAiPromptNextQuestion: answeredPrompt?.answeredAiPromptNextQuestion || '',
-        userText,
-        aiReply,
-        inputMode,
-        audioFile,
-        audioSizeKB,
-        topicId: selectedTopic?.id || session.currentTopicId || DEFAULT_TOPIC_ID,
-        topicTitle: selectedTopic?.title || '',
-        topicProgress: selectedTopic?.progress || 0,
-    });
     rememberAiPromptForNextTurn(session, {
         text: aiReply,
         source: 'ai_reply',
@@ -3212,19 +3362,41 @@ async function processUserTextInteraction(sessionId, session, {
     if (shouldSpeak) {
         // ── Step 3: 语音合成 (TTS) ──
         console.log(`[${sessionId}] Step 3: 语音合成中...`);
-        sendJson(session.ws, { status: 'ai_speaking', text: aiReply });
+        sendJson(session.ws, {
+            event: 'turn_completed',
+            status: 'ai_speaking',
+            turnId: effectiveTurnId,
+            text: aiReply,
+            provider: aiResult.provider || '',
+            fallbackLevel: aiResult.fallbackLevel || 0,
+            turnStatus: aiResult.status || '',
+        });
+        sendJson(session.ws, { status: 'ai_speaking', turnId: effectiveTurnId, text: aiReply });
 
-        const audioData = await synthesizeSpeech(aiReply, session.userPreferences);
+        const audioData = await synthesizeSpeech(aiReply, session.userPreferences, {
+            userId,
+            sessionId,
+        });
         if (audioData) {
             session.ws.send(audioData);
             console.log(`[${sessionId}] TTS 音频已发送 ${(audioData.length / 1024).toFixed(1)} KB`);
         }
 
-        sendJson(session.ws, { event: 'ai_response_end', status: 'ready' });
+        sendJson(session.ws, { event: 'ai_response_end', status: 'ready', turnId: effectiveTurnId });
     } else {
+        sendJson(session.ws, {
+            event: 'turn_completed',
+            status: 'ready',
+            turnId: effectiveTurnId,
+            text: aiReply,
+            provider: aiResult.provider || '',
+            fallbackLevel: aiResult.fallbackLevel || 0,
+            turnStatus: aiResult.status || '',
+        });
         sendJson(session.ws, {
             event: 'ai_text_response',
             status: 'ready',
+            turnId: effectiveTurnId,
             text: aiReply,
         });
     }
@@ -3320,9 +3492,10 @@ async function chatWithAI(sessionId, session, userText, options = {}) {
             session.conversationHistory = session.conversationHistory.slice(-40);
         }
 
-        const topicProfile = session.userId
+        const hasTopicProfileOption = Object.prototype.hasOwnProperty.call(options, 'topicProfile');
+        const topicProfile = hasTopicProfileOption ? options.topicProfile : (session.userId
             ? await getOrCreateTopicProfile(session.userId)
-            : null;
+            : null);
         const topicPrompt = buildTopicInterviewPrompt(
             AI_SYSTEM_PROMPT,
             topicProfile,
@@ -3337,30 +3510,32 @@ async function chatWithAI(sessionId, session, userText, options = {}) {
             ...session.conversationHistory,
         ];
 
-        const usageStartTime = Date.now();
-        const aiResult = await aiProvider.completeChat({
+        const aiResult = await completeChatWithFallback({
+            providerEntries: chatProviderEntries,
             messages,
             temperature: 0.7,
             topP: 0.9,
+            usageRecorder,
+            usageContext: {
+                userId: session.userId,
+                sessionId,
+            },
+            localFallbackContext: {
+                userText,
+                topicTitle: options.selectedTopic?.title || '',
+            },
         });
-        await usageRecorder.recordUsage({
-            userId: session.userId,
-            sessionId,
-            provider: aiResult?.provider || aiProvider.name,
-            model: aiResult?.model || '',
-            operation: 'chat',
-            ...(aiResult?.usage || {}),
-            inputContextTokens: aiResult?.usage?.inputTokens || 0,
-            status: 'success',
-            latencyMs: Date.now() - usageStartTime,
+        let aiReply = aiResult.text || buildLocalFallbackReply({
+            userText,
+            topicTitle: options.selectedTopic?.title || '',
         });
-        let aiReply = aiResult?.text || aiResult || '抱歉，我没有理解，请再说一次。';
-        const selectedTopic = topicProfile ? getSelectedTopic(topicProfile, session.currentTopicId) : null;
+        const selectedTopic = options.selectedTopic ||
+            (topicProfile ? getSelectedTopic(topicProfile, session.currentTopicId) : null);
         const safeReply = normalizeQuestionForElder({
             question: aiReply,
             currentTopicId: selectedTopic?.id || session.currentTopicId,
             topicTitle: selectedTopic?.title || '',
-            source: 'hunyuan_reply',
+            source: aiResult.localFallback ? 'local_fallback_reply' : 'model_reply',
         });
         aiReply = safeReply.question;
 
@@ -3368,7 +3543,10 @@ async function chatWithAI(sessionId, session, userText, options = {}) {
         if (session.pendingRecommendationQuestion) {
             session.pendingRecommendationQuestion = null;
         }
-        return aiReply;
+        return {
+            ...aiResult,
+            text: aiReply,
+        };
     } catch (err) {
         await usageRecorder.recordUsage({
             userId: session.userId,
@@ -3382,7 +3560,19 @@ async function chatWithAI(sessionId, session, userText, options = {}) {
         if (session.pendingRecommendationQuestion) {
             session.pendingRecommendationQuestion = null;
         }
-        return '抱歉，AI 暂时无法回复，请稍后再试。';
+        const fallbackText = buildLocalFallbackReply({
+            userText,
+            topicTitle: options.selectedTopic?.title || '',
+        });
+        session.conversationHistory.push({ Role: 'assistant', Content: fallbackText });
+        return {
+            text: fallbackText,
+            provider: 'local',
+            model: 'local-fallback',
+            fallbackLevel: chatProviderEntries.length,
+            localFallback: true,
+            attempts: [{ provider: aiProvider.name, errorMessage: err.message || String(err) }],
+        };
     }
 }
 
@@ -3450,7 +3640,11 @@ async function analyzeTopicProgressFromTurn(sessionId, session, userText, aiRepl
 async function synthesizeSpeech(text, userPreferences = DEFAULT_USER_PREFERENCES, usageContext = {}) {
     const usageStartTime = Date.now();
     try {
-        const audioData = await voiceProvider.synthesizeSpeech(text, userPreferences);
+        const audioData = await withTimeout(
+            voiceProvider.synthesizeSpeech(text, userPreferences),
+            PROVIDER_CONFIG.chat?.ttsTimeoutMs || 12000,
+            `tts:${voiceProvider.name}`,
+        );
         await usageRecorder.recordUsage({
             userId: usageContext.userId || null,
             sessionId: usageContext.sessionId || null,

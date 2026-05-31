@@ -30,11 +30,35 @@ test('reads Doubao Ark and speech placeholders without changing DeepSeek setting
 
     assert.equal(config.llmProvider, 'doubao');
     assert.equal(config.voiceProvider, 'doubao');
+    assert.equal(config.chat.primaryProvider, 'doubao');
+    assert.equal(config.chat.fallbackProvider, 'hunyuan');
+    assert.equal(config.chat.primaryTimeoutMs, 15000);
+    assert.equal(config.chat.fallbackTimeoutMs, 15000);
+    assert.equal(config.chat.ttsTimeoutMs, 12000);
     assert.equal(config.ark.apiKey, 'ark-key');
     assert.equal(config.ark.chatModel, 'ep-123');
     assert.equal(config.doubaoSpeech.apiKey, 'speech-key');
     assert.equal(config.doubaoSpeech.asrResourceId, 'volc.bigasr.auc_turbo');
     assert.equal(config.doubaoSpeech.ttsVoice, 'zh_female_vv_uranus_bigtts');
+});
+
+test('reads explicit chat fallback providers and timeout budgets', () => {
+    const config = getProviderConfig({
+        LLM_PROVIDER: 'doubao',
+        CHAT_PRIMARY_PROVIDER: 'doubao',
+        CHAT_FALLBACK_PROVIDER: 'hunyuan',
+        CHAT_PRIMARY_TIMEOUT_MS: '9000',
+        CHAT_FALLBACK_TIMEOUT_MS: '7000',
+        TURN_TOTAL_TIMEOUT_MS: '25000',
+        TTS_TIMEOUT_MS: '5000',
+    });
+
+    assert.equal(config.chat.primaryProvider, 'doubao');
+    assert.equal(config.chat.fallbackProvider, 'hunyuan');
+    assert.equal(config.chat.primaryTimeoutMs, 9000);
+    assert.equal(config.chat.fallbackTimeoutMs, 7000);
+    assert.equal(config.chat.turnTotalTimeoutMs, 25000);
+    assert.equal(config.chat.ttsTimeoutMs, 5000);
 });
 
 test('throws a clear error when an unknown provider is configured', () => {
