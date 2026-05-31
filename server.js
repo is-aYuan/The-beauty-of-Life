@@ -782,20 +782,22 @@ function buildTurnEventPayload(event, turn) {
     };
 }
 
-async function recoverLatestTurnForSession(sessionId, session) {
-    if (!session.userId) return;
-    const latestTurn = await turnTaskStore.safeGetLatestRecoverableTurn(session.userId);
-    if (!latestTurn || !isRecentTurn(latestTurn)) return;
+async function recoverLatestTurnForSession(sessionId, session, turnId) {
+    const safeTurnId = typeof turnId === 'string' && turnId.trim() ? turnId.trim() : '';
+    if (!session.userId || !safeTurnId) return;
 
-    if (isCompletedTurnStatus(latestTurn.status) && latestTurn.aiText) {
-        sendJson(session.ws, buildTurnEventPayload('turn_recovered', latestTurn));
-        console.log(`[${sessionId}] 已恢复最近 turn ${latestTurn.turnId}`);
+    const requestedTurn = await turnTaskStore.safeFindByTurnId(safeTurnId, session.userId);
+    if (!requestedTurn || !isRecentTurn(requestedTurn)) return;
+
+    if (isCompletedTurnStatus(requestedTurn.status) && requestedTurn.aiText) {
+        sendJson(session.ws, buildTurnEventPayload('turn_recovered', requestedTurn));
+        console.log(`[${sessionId}] 已恢复指定 turn ${requestedTurn.turnId}`);
         return;
     }
 
-    if (latestTurn.status === 'accepted' || latestTurn.status === 'processing') {
-        sendJson(session.ws, buildTurnEventPayload('turn_accepted', latestTurn));
-        console.log(`[${sessionId}] 最近 turn ${latestTurn.turnId} 仍在处理中`);
+    if (requestedTurn.status === 'accepted' || requestedTurn.status === 'processing') {
+        sendJson(session.ws, buildTurnEventPayload('turn_accepted', requestedTurn));
+        console.log(`[${sessionId}] 指定 turn ${requestedTurn.turnId} 仍在处理中`);
     }
 }
 
@@ -2693,9 +2695,6 @@ async function handleMessage(sessionId, session, msg) {
             speakEntryGuidance(sessionId, session, entry.entryGuidance).catch((err) => {
                 console.error(`[${sessionId}] 入口引导朗读失败:`, err.message || err);
             });
-            recoverLatestTurnForSession(sessionId, session).catch((err) => {
-                console.error(`[${sessionId}] 最近 turn 恢复失败:`, err.message || err);
-            });
         } else {
             sendJson(session.ws, {
                 status: 'login_failed',
@@ -2746,13 +2745,13 @@ async function handleMessage(sessionId, session, msg) {
         return;
     }
 
-    // 移动端 WebSocket 重连后主动恢复最近一轮 turn，避免用户看到无限“正在整理”。
+    // 移动端 WebSocket 重连后只恢复当前标签页声明的指定 turn，避免正常登录误恢复历史 completed 对话。
     if (msg.type === 'recover_latest_turn') {
         if (!session.userId) {
             sendJson(session.ws, { status: 'need_login', text: '请先登录' });
             return;
         }
-        await recoverLatestTurnForSession(sessionId, session);
+        await recoverLatestTurnForSession(sessionId, session, msg.turnId);
         return;
     }
 
@@ -2877,6 +2876,7 @@ async function handleMessage(sessionId, session, msg) {
             sendJson(session.ws, {
                 event: 'text_input_error',
                 status: 'ready',
+                turnId: msg.turnId || '',
                 text: '请先输入想说的话。',
             });
             return;
@@ -2896,6 +2896,7 @@ async function handleMessage(sessionId, session, msg) {
             sendJson(session.ws, {
                 event: 'text_input_error',
                 status: 'ready',
+                turnId: msg.turnId || '',
                 text: '抱歉，处理出错了，请再试一次。',
             });
         } finally {

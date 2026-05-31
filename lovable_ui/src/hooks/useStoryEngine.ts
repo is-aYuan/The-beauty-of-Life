@@ -17,6 +17,13 @@ import {
 import { getRuntimeConfig } from "../lib/runtimeConfig.js";
 import { upsertSessionEntryMessage } from "../lib/sessionEntryMessage.js";
 import {
+  clearPendingTurn,
+  getPendingTurnStorage,
+  loadPendingTurn,
+  savePendingTurn,
+  type PendingTurnInputMode,
+} from "../lib/pendingTurnRecovery.js";
+import {
   createVoiceDraftMessage,
   failVoiceTranscript,
   finalizeVoiceTranscript,
@@ -262,6 +269,7 @@ export function useStoryEngine() {
     setArchive(null);
     setBiographies([]);
     localStorage.removeItem("story_user");
+    clearPendingTurn(getPendingTurnStorage());
     closeWebSocket();
     setUser(null);
   };
@@ -495,9 +503,45 @@ export function useStoryEngine() {
   const createTurnId = (prefix: "voice" | "text") =>
     `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
+  // 模块：当前标签页 pending turn 协议。只允许恢复本 tab 未完成的指定 turnId，正常登录不恢复历史 completed turn。
+  const loadCurrentPendingTurn = () => {
+    const currentUser = userRef.current;
+    return loadPendingTurn(getPendingTurnStorage(), currentUser?.userId || "");
+  };
+
+  const rememberPendingTurn = ({
+    turnId,
+    inputMode: pendingInputMode,
+  }: {
+    turnId?: string;
+    inputMode: PendingTurnInputMode;
+  }) => {
+    const currentUser = userRef.current;
+    if (!currentUser?.userId || !turnId) return null;
+    return savePendingTurn(getPendingTurnStorage(), {
+      userId: currentUser.userId,
+      turnId,
+      inputMode: pendingInputMode,
+    });
+  };
+
+  const clearCurrentPendingTurn = () => {
+    clearPendingTurn(getPendingTurnStorage());
+  };
+
+  const clearPendingTurnIfMatches = (turnId?: string) => {
+    const pendingTurn = loadCurrentPendingTurn();
+    if (!pendingTurn) return;
+    if (!turnId || pendingTurn.turnId === turnId) {
+      clearCurrentPendingTurn();
+    }
+  };
+
   const requestLatestTurnRecovery = () => {
+    const pendingTurn = loadCurrentPendingTurn();
+    if (!pendingTurn) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: "recover_latest_turn" }));
+    wsRef.current.send(JSON.stringify({ type: "recover_latest_turn", turnId: pendingTurn.turnId }));
   };
 
   // 模块：WebSocket 生命周期管理。区分主动关闭和异常掉线，避免清理旧连接时触发重连循环。
@@ -648,6 +692,7 @@ export function useStoryEngine() {
       if (msg.event === "ai_text_response") {
         const text = msg.text || "";
         appendAiMessage(text, msg.turnId);
+        clearPendingTurnIfMatches(msg.turnId);
         setSubtitle(text);
         setConvoState("idle");
         fetchStats();
@@ -655,7 +700,14 @@ export function useStoryEngine() {
         return;
       }
 
-      if (msg.event === "turn_accepted" || msg.event === "turn_busy") {
+      if (msg.event === "turn_accepted") {
+        setAiThinkingText(msg.text || "我在接着整理您的故事...");
+        setConvoState("aiThinking");
+        return;
+      }
+
+      if (msg.event === "turn_busy") {
+        clearPendingTurnIfMatches(msg.turnId);
         setAiThinkingText(msg.text || "我在接着整理您的故事...");
         setConvoState("aiThinking");
         return;
@@ -664,6 +716,7 @@ export function useStoryEngine() {
       if (msg.event === "turn_completed") {
         const text = msg.text || "";
         appendAiMessage(text, msg.turnId);
+        clearPendingTurnIfMatches(msg.turnId);
         setSubtitle(text);
         setConvoState(msg.status === "ai_speaking" ? "aiTalking" : "idle");
         if (msg.status === "ready") {
@@ -674,9 +727,14 @@ export function useStoryEngine() {
       }
 
       if (msg.event === "turn_recovered") {
+        const pendingTurn = loadCurrentPendingTurn();
+        if (!pendingTurn || pendingTurn.turnId !== msg.turnId) {
+          return;
+        }
         const text = msg.text || "";
         appendUserMessage(msg.userText, msg.turnId);
         appendAiMessage(text, msg.turnId);
+        clearPendingTurnIfMatches(msg.turnId);
         setSubtitle(text);
         setConvoState("idle");
         fetchStats();
@@ -686,6 +744,7 @@ export function useStoryEngine() {
 
       if (msg.event === "text_input_error") {
         const message = msg.text || "文字发送失败，请再试一次。";
+        clearPendingTurnIfMatches(msg.turnId);
         setRecorderError(message);
         setSubtitle(message);
         setConvoState("idle");
@@ -758,6 +817,7 @@ export function useStoryEngine() {
       }
       if (msg.event === "user_transcript_failed") {
         const message = msg.text || "没有听清，请再说一次。";
+        clearPendingTurnIfMatches(msg.turnId);
         setChatHistory((prev) =>
           failVoiceTranscript(prev, {
             turnId: msg.turnId,
@@ -779,6 +839,7 @@ export function useStoryEngine() {
       }
 
       if (msg.event === "ai_response_end") {
+        if (msg.turnId) clearPendingTurnIfMatches(msg.turnId);
         setConvoState("idle");
         fetchStats();
         fetchArchive();
@@ -929,6 +990,7 @@ export function useStoryEngine() {
       mode,
     };
     activeVoiceTurnRef.current = voiceTurn;
+    rememberPendingTurn({ turnId: voiceTurn.turnId, inputMode: "voice" });
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
@@ -985,6 +1047,7 @@ export function useStoryEngine() {
     activeVoiceTurnRef.current = null;
 
     if (sendEvent && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      rememberPendingTurn({ turnId: voiceTurn?.turnId, inputMode: "voice" });
       wsRef.current.send(
         JSON.stringify({
           event: "user_speech_ended",
@@ -992,6 +1055,8 @@ export function useStoryEngine() {
           mode: voiceTurn?.mode,
         }),
       );
+    } else if (voiceTurn?.turnId) {
+      clearPendingTurnIfMatches(voiceTurn.turnId);
     }
 
     if (explicitStopCallbackRef.current) {
@@ -1133,6 +1198,7 @@ export function useStoryEngine() {
     enterTextInputMode();
     setRecorderError("");
     const turnId = createTurnId("text");
+    rememberPendingTurn({ turnId, inputMode: "text" });
     setChatHistory((prev) => [...prev, { id: Date.now(), role: "user", text: trimmed, turnId }]);
     setConvoState("aiThinking");
     wsRef.current.send(
