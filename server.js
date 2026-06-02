@@ -1816,6 +1816,104 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 手机号查重 — 静默分流：判断手机号是否已注册
+    if (url.pathname === '/api/check-phone' && req.method === 'POST') {
+        try {
+            const { phone } = parseJsonBody(await getRequestBody(req));
+            if (!phone || phone.length !== 11) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, message: '请输入11位手机号' }));
+                return;
+            }
+            const existing = await db.collection('users').where({ phone, status: 'active' }).get();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, exists: existing.data.length > 0 }));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+        return;
+    }
+
+    // 验证码统一入口 — 无差别一键准入流线
+    // 开发模式：接受任意 6 位数字验证码
+    // TODO: 生产环境接入腾讯云短信 SDK，替换为真实短信验证码
+    if (url.pathname === '/api/verify-code' && req.method === 'POST') {
+        try {
+            const { phone, code, consent, name, age } = parseJsonBody(await getRequestBody(req));
+            const consentValidation = validateConsentInput(consent);
+            if (!consentValidation.valid) {
+                sendConsentError(res, consentValidation);
+                return;
+            }
+            if (!phone || phone.length !== 11) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, message: '请输入11位手机号' }));
+                return;
+            }
+            if (!code || code.length !== 6) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, message: '请输入6位验证码' }));
+                return;
+            }
+
+            // 开发模式：任意 6 位数字均通过验证
+            // TODO: 生产环境替换为真实验证码校验
+            const existing = await db.collection('users').where({ phone, status: 'active' }).get();
+            let result;
+            if (existing.data.length > 0) {
+                // 分支 A：老朋友回家
+                const user = existing.data[0];
+                result = {
+                    success: true,
+                    userId: user._id,
+                    phone: user.phone,
+                    name: user.name,
+                    age: user.age,
+                    authToken: createAuthToken({ userId: user._id, phone: user.phone }, AUTH_TOKEN_SECRET),
+                };
+                console.log(`[用户] 验证码登录成功: ${user.name} (${phone})`);
+            } else {
+                // 分支 B：新朋友安家
+                if (!name) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, message: '请输入您的姓名' }));
+                    return;
+                }
+                const newUser = await db.collection('users').add({
+                    phone,
+                    name,
+                    age: age || null,
+                    createdAt: db.serverDate(),
+                    updatedAt: db.serverDate(),
+                    status: 'active',
+                });
+                result = {
+                    success: true,
+                    userId: newUser.id,
+                    phone,
+                    name,
+                    age: age || null,
+                    authToken: createAuthToken({ userId: newUser.id, phone }, AUTH_TOKEN_SECRET),
+                };
+                console.log(`[用户] 验证码注册成功: ${name} (${phone})`);
+            }
+            if (result.success) {
+                await recordUserConsent(db, {
+                    userId: result.userId,
+                    phone: result.phone,
+                    ...buildConsentMetadataFromRequest(req, 'login'),
+                });
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+        return;
+    }
+
     // 老用户首次设置密码
     if (url.pathname === '/api/users/set-password' && req.method === 'POST') {
         try {

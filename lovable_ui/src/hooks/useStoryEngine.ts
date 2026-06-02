@@ -257,6 +257,44 @@ export function useStoryEngine() {
     return { success: false, message: result.message };
   };
 
+  // 模块：无差别一键准入流线。静默分流 — 后台查询手机号是否已注册。
+  const checkPhone = async (phone: string) => {
+    const res = await fetch(`${CONFIG.API_BASE}/api/check-phone`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone }),
+    });
+    return res.json() as Promise<{ success: boolean; exists: boolean }>;
+  };
+
+  // 模块：验证码统一入口。开发模式接受任意 6 位数字，生产环境接入真实短信。
+  const verifyCode = async (input: {
+    phone: string;
+    code: string;
+    consent: LegalConsentInput;
+    name?: string;
+    age?: string;
+  }) => {
+    const res = await fetch(`${CONFIG.API_BASE}/api/verify-code`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phone: input.phone,
+        code: input.code,
+        consent: input.consent,
+        name: input.name,
+        age: input.age ? parseInt(input.age) : null,
+      }),
+    });
+    const result = await res.json();
+    if (result.success) {
+      setUser(result);
+      localStorage.setItem("story_user", JSON.stringify(result));
+      return { success: true };
+    }
+    return { success: false, message: result.message };
+  };
+
   const logout = () => {
     activeAudioSessionRef.current = null;
     stopRecording(false);
@@ -1370,6 +1408,8 @@ export function useStoryEngine() {
     login,
     register,
     setPassword,
+    checkPhone,
+    verifyCode,
     logout,
     startManualRecord,
     stopManualRecord,

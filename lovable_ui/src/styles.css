@@ -140,6 +140,7 @@
   html,
   body,
   #root {
+    width: 100%;
     max-width: 100%;
     overflow-x: hidden;
   }
@@ -158,6 +159,16 @@
     min-width: 0;
     background-color: var(--color-background);
     color: var(--color-foreground);
+  }
+
+  /* 消除移动端 300ms 点击延迟 — 适老化交互基础保障 */
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  label {
+    touch-action: manipulation;
   }
 }
 
